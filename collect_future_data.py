@@ -159,7 +159,6 @@ class Trader:
         :acctid:
         str
             期货交易账号
-
         :return:
         str
             trader项目中使用的product_id
