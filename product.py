@@ -62,31 +62,13 @@ class Account(Product):
     @staticmethod
     def __holding2mv_ce(df_holding):
         df_holding['证券代码'] = df_holding['证券代码'].apply(lambda x: x.zfill(6))
-
         df_holding[df_holding['证券代码']] =
 
 
 
 
 
-    def collect_trddata(self, str_date, dirpath_source_data=f'D:/data/A_trading_data/1500+/A_result'):
-        cursor_find = self.col_myacctsinfo.find_one({'date': str_date, 'acctid': self.acctid})
-        fpath_holding = dirpath_source_data + '/' + str_date + cursor_find['fpath_holding']
-        str_ext = os.path.splitext(fpath_holding)[1]
-        if str_ext in ['.xlsx', '.xls']:
-            df_capital = pd.read_excel(fpath_holding, nrows=1)
-            df_holding = pd.read_excel(fpath_holding, skiprows=3)
-        elif str_ext == '.csv':
-            df_capital = pd.read_csv(fpath_holding, nrows=1, encoding='gbk',
-                                     dtype={'资产账户': str, '总资产': float, '总负债': float, '净资产': float,
-                                            '资金可用金': float})
-            df_holding = pd.read_csv(fpath_holding, skiprows=3, encoding='gbk',
-                                     dtype={'证券代码': str, '市值': float})
-        else:
-            raise TypeError('Unknown file type!')
-        print(df_capital)
-        print(df_capital.to_dict('record'))
-        print(df_holding)
+
 
 
 
