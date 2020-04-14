@@ -27,17 +27,19 @@ import os
 import pandas as pd
 import pymongo
 
+from trader import Trader
+
 
 STR_DATE = '20200410'  # todo 该常量目前开发用，实测时应更改为 self.str_today
 
 
 class DBTradingData:
     def __init__(self):
+        self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.db_basicinfo = self.client_mongo['basicinfo']
         self.col_myacctsinfo = self.db_basicinfo['myacctsinfo']
         self.db_trddata = self.client_mongo['db_trddata']
-        self.today = datetime.strftime(datetime.today(), '%Y%m%d')
         self.dirpath_raw_data = 'D:/data/A_trading_data/1500+/A_result'
 
     @staticmethod
@@ -57,27 +59,69 @@ class DBTradingData:
         print(df_capital)
         print(df_holding)
 
+    # def update_all_trddata(self):
+    #     """
+    #     f"{prdcode}_{accttype}_{acctid}_{content}}
+    #     :return:
+    #     """
+    #     cursor_find = self.col_myacctsinfo.find({'date': STR_DATE, 'accttype': 'c', 'rptmark': '1'})
+    #     for _ in cursor_find:
+    #         prdcode = _['prdcode']
+    #         accttype = _['accttype']
+    #         acctid = _['acctid']
+    #         colname = f'{prdcode}_{accttype}_{acctid}_b/s'
+    #         col_bs = self.db_trddata[colname]
+    #
+    #         fpath_holding = self.dirpath_raw_data + f'/{STR_DATE}' + _['fpath_holding']
+    #         dict_data_to_be_updated = self.__process_raw_data_cash(fpath_holding)
+    #         if col_bs.find_one({'date': STR_DATE, 'acctid': acctid}):
+    #             col_bs.update(dict_data_to_be_updated)
+    #         else:
+    #             col_bs.insert_one(dict_data_to_be_updated)
 
-
-    def update_all_trddata(self):
+    def get_faccts_trddata(self):
         """
         f"{prdcode}_{accttype}_{acctid}_{content}}
-        :return:
         """
-        cursor_find = self.col_myacctsinfo.find({'date': STR_DATE, 'accttype': 'c', 'rptmark': '1'})
+        cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': '1'})
         for _ in cursor_find:
             prdcode = _['prdcode']
             accttype = _['accttype']
             acctid = _['acctid']
-            colname = f'{prdcode}_{accttype}_{acctid}_b/s'
-            col_bs = self.db_trddata[colname]
-
-            fpath_holding = self.dirpath_raw_data + f'/{STR_DATE}' + _['fpath_holding']
-            dict_data_to_be_updated = self.__process_raw_data_cash(fpath_holding)
-            if col_bs.find_one({'date': STR_DATE, 'acctid': acctid}):
-                col_bs.update(dict_data_to_be_updated)
+            colname_capital = f'{prdcode}_{accttype}_{acctid}_b/s'
+            trader = Trader(acctid)
+            dict_res_capital = trader.query_account()
+            if dict_res_capital['success'] == 1:
+                dict_capital_to_be_update = dict_res_capital['list'][0]
+                dict_capital_to_be_update['date'] = self.str_today
+                col_f_capital = self.db_trddata[colname_capital]
+                col_f_capital.delete_many({'date': self.str_today})
+                col_f_capital.insert_one(dict_capital_to_be_update)
             else:
-                col_bs.insert_one(dict_data_to_be_updated)
+                print(f'Query data of {acctid}({accttype})failed.')
+
+            colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
+            dict_res_holding = trader.query_holding()
+            if dict_res_holding['success'] == 1:
+                list_dicts_holding_to_be_update = dict_res_holding['list']
+                for dict_holding_to_be_update in list_dicts_holding_to_be_update:
+                    dict_holding_to_be_update['date'] = self.str_today
+                    dict_holding_to_be_update['acctid'] = acctid
+                col_f_holding = self.db_trddata[colname_holding]
+                col_f_holding.delete_many({'date': self.str_today})
+                if list_dicts_holding_to_be_update:
+                    col_f_holding.insert_many(list_dicts_holding_to_be_update)
+                else:
+                    pass
+            else:
+                print(f'Query data of {acctid}({accttype})failed.')
+
+
+a = DBTradingData()
+a.get_faccts_trddata()
+
+
+
 
 
 

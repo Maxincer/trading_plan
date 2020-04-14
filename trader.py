@@ -20,26 +20,32 @@ pd.set_option('max_colwidth', 9999)
 class Trader:
     socket = None
 
-    def __init__(self, product_id, user_id='INDEXFUTURE'):
+    def __init__(self, acctid, user_id='INDEXFUTURE'):
         """
-        :param product_id: 产品ID（ORACLEDB.FUTURE1.SYSTEM_PRODUCT_DETAIL.PNAME, eg."jx4_nh")
+        :param acctid: basicinfo数据库中的acctid
         :param user_id: 'INDEXFUTURE'
         """
+
+        config = configparser.ConfigParser()
+        config.read("config.ini")
+        username = config.get("sysconfig", "username")
+        password = config.get("sysconfig", "password")
+        url = config.get("sysconfig", "url")
+        self.config_connect = cx_Oracle.connect('%s/%s@%s' % (username, password, url))
+
+        sql = f"SELECT PCODE FROM SYSTEM_PRODUCT_DETAIL WHERE ACCOUNTID='{acctid}'"
+        query_cursor = self.config_connect.cursor()
+        query_cursor.execute(sql)
+        rows = query_cursor.fetchall()
+        query_cursor.close()
+        product_id = rows[0][0]
         self.product_id = str(product_id)
         self.user_id = str(user_id)
 
-        __config = configparser.ConfigParser()
-        __config.read("config.ini")
-        __username = __config.get("sysconfig", "username")
-        __password = __config.get("sysconfig", "password")
-        __url = __config.get("sysconfig", "url")
-
-        self.config_connect = cx_Oracle.connect('%s/%s@%s' % (__username, __password, __url))
         self.product_name, self.product_number = self.query_product_info()
-
         if self.product_number is None:
             raise Exception("%s未配置后台连接端口，请确认后重试！" % self.product_name)
-        self.trade_address = __config.get("base", "trade_address")
+        self.trade_address = config.get("base", "trade_address")
         try:
             telnetlib.Telnet(self.trade_address, port=7000+self.product_number, timeout=10)
         except BaseException as e:
@@ -80,28 +86,12 @@ class Trader:
         parse_message = json.loads(server_message, encoding="gb2312")
         return parse_message
 
-    def query_holding(self, product_id):
+    def query_holding(self):
         """
         Query the holding information
-        :param product_id:
-        :return:
         """
-        message = self.send_request("query_holding", product_id)
-        if message["success"] and "list" in message:
-            columns = {"instrument_id": str, "direction": str, "hedge": str, "position": int, "position_td": int,
-                       "position_pre": int, "open_volume": int, "close_volume": int, "use_margin": float,
-                       "position_cost": float}
-            df_ret_draft = pd.DataFrame(message['list'], columns=columns)
-            df_ret = df_ret_draft.fillna(0).groupby(['instrument_id', "direction", "hedge"]).sum().reset_index()
-            return df_ret
-        else:
-            if 'msg' in message:
-                print("%s持仓明细查询失败，错误信息：%s" % (self.product_name, message["msg"]))
-            else:
-                print("%s持仓明细查询失败！" % self.product_name)
-
-            return pd.DataFrame(columns=["instrument_id", "direction", "hedge",
-                                         "position", "position_td", "position_pre"])
+        message = self.send_request("query_holding", self.product_id)
+        return message
 
     def query_account(self):
         """
@@ -153,27 +143,6 @@ class Trader:
         else:
             return None, None
 
-    def acctid2product_id(self, acctid):
-        """
-        注：在trader类中，product_id形如3_xb, 由产品代码和经济上缩写联合表示，映射一个期货账户
-        :acctid:
-        str
-            期货交易账号
-        :return:
-        str
-            trader项目中使用的product_id
-        """
-        __sql = f"SELECT PCODE FROM SYSTEM_PRODUCT_DETAIL WHERE ACCOUNTID='{acctid}'"
-        __query_cursor = self.config_connect.cursor()
-        __query_cursor.execute(__sql)
-        __rows = __query_cursor.fetchall()
-        __query_cursor.close()
-        product_id = __rows[0][0]
-        return product_id
-
-
-a = Trader('3_xb')
-print(a.acctid2product_id('666073675'))
 
 
 
@@ -190,6 +159,5 @@ print(a.acctid2product_id('666073675'))
 
 
 
-print('Done.')
 
 

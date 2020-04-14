@@ -19,13 +19,8 @@ class DatabaseBasicInfo:
         list_dicts_to_be_inserted = df_myprdsinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['date'] = self.str_today
-            if self.col_myprdsinfo.find_one({'date': dict_to_be_inserted['date'],
-                                             'prdcode': dict_to_be_inserted['prdcode']}):
-                self.col_myprdsinfo.update_one({'date': dict_to_be_inserted['date'],
-                                                'prdcode': dict_to_be_inserted['prdcode']},
-                                               {'$set': dict_to_be_inserted})
-            else:
-                self.col_myprdsinfo.insert_one(dict_to_be_inserted)
+        self.col_myprdsinfo.delete_many({'date': self.str_today})
+        self.col_myprdsinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "myprdsinfo" has been updated.')
 
     def update_myacctsinfo(self):
@@ -34,13 +29,8 @@ class DatabaseBasicInfo:
         list_dicts_to_be_inserted = df_myacctsinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['date'] = self.str_today
-            if self.col_myacctsinfo.find_one({'date': dict_to_be_inserted['date'],
-                                              'acctid': dict_to_be_inserted['acctid']}):
-                self.col_myacctsinfo.update_one({'date': dict_to_be_inserted['date'],
-                                                 'acctid': dict_to_be_inserted['acctid']},
-                                                {'$set': dict_to_be_inserted})
-            else:
-                self.col_myacctsinfo.insert_one(dict_to_be_inserted)
+        self.col_myacctsinfo.delete_many({'date': self.str_today})
+        self.col_myacctsinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "myacctsinfo" has been updated.')
 
 
