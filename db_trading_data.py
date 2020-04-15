@@ -79,9 +79,10 @@ class DBTradingData:
     #         else:
     #             col_bs.insert_one(dict_data_to_be_updated)
 
-    def get_faccts_trddata(self):
+    def update_trddata_f(self):
         """
         f"{prdcode}_{accttype}_{acctid}_{content}}
+        # todo 可用装饰器优化
         """
         cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': '1'})
         for _ in cursor_find:
@@ -97,8 +98,9 @@ class DBTradingData:
                 col_f_capital = self.db_trddata[colname_capital]
                 col_f_capital.delete_many({'date': self.str_today})
                 col_f_capital.insert_one(dict_capital_to_be_update)
+                print(f'Query capital data of {acctid}({accttype}) succeed.')
             else:
-                print(f'Query data of {acctid}({accttype})failed.')
+                print(f'Query capital data of {acctid}({accttype}) failed.')
 
             colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
             dict_res_holding = trader.query_holding()
@@ -113,12 +115,33 @@ class DBTradingData:
                     col_f_holding.insert_many(list_dicts_holding_to_be_update)
                 else:
                     pass
+                print(f'Query holding data of {acctid}({accttype}) succeed.')
+
             else:
-                print(f'Query data of {acctid}({accttype})failed.')
+                print(f'Query holding data of {acctid}({accttype}) succeed.')
+
+            colname_trading = f'{prdcode}_{accttype}_{acctid}_trading'
+            dict_res_trading = trader.query_trading()
+            if dict_res_trading['success'] == 1:
+                list_dicts_trading_to_be_update = dict_res_trading['list']
+                for dict_trading_to_be_update in list_dicts_trading_to_be_update:
+                    dict_trading_to_be_update['date'] = self.str_today
+                    dict_trading_to_be_update['acctid'] = acctid
+                col_f_trading = self.db_trddata[colname_trading]
+                col_f_trading.delete_many({'date': self.str_today})
+                if list_dicts_trading_to_be_update:
+                    col_f_trading.insert_many(list_dicts_trading_to_be_update)
+                else:
+                    pass
+                print(f'Query trading data of {acctid}({accttype}) succeed.')
+
+            else:
+                print(f'Query trading data of {acctid}({accttype}) succeed.')
 
 
-a = DBTradingData()
-a.get_faccts_trddata()
+if __name__ == '__main__':
+    a = DBTradingData()
+    a.update_trddata_f()
 
 
 
