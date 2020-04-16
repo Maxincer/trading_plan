@@ -30,12 +30,10 @@ import pymongo
 from trader import Trader
 
 
-STR_DATE = '20200410'  # todo 该常量目前开发用，实测时应更改为 self.str_today
-
-
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200415'
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.db_basicinfo = self.client_mongo['basicinfo']
         self.col_myacctsinfo = self.db_basicinfo['myacctsinfo']
@@ -43,41 +41,118 @@ class DBTradingData:
         self.dirpath_raw_data = 'D:/data/A_trading_data/1500+/A_result'
 
     @staticmethod
-    def __process_raw_data_cash(fpath_holding):
+    def read_lines(fpath, skiprows=0, nrows=0):
+        with open(fpath, 'rb') as f:
+            list_list_datainline = []
+            list_lines = f.readlines()
+            if nrows:
+                for line in list_lines[skiprows:skiprows + nrows]:
+                    line = line.decode(encoding='gbk', errors='replace').replace('=', '').replace('"', '')
+                    list_datainline = line.split('\t')
+                    list_list_datainline.append(list_datainline)
+            else:
+                for line in list_lines[skiprows:]:
+                    line = line.decode(encoding='gbk', errors='replace').replace('=', '').replace('"', '')
+                    list_datainline = line.split('\t')
+                    list_list_datainline.append(list_datainline)
+            df_ret = pd.DataFrame(list_list_datainline[1:], columns=list_list_datainline[0])
+            return df_ret
+
+    @staticmethod
+    def read_xlsx(fpath):
+        """
+        本函数为业务函数， 面向读取xlsx格式的一揽子方案。
+        1. 正常情况下，xlsx正常读取；
+        2. 如925的情况，xlsx格式，首行为合并单元格： 资金
+
+        :param fpath:
+        :return:
+        """
+        df_capital = pd.read_excel(fpath, nrows=1)
+        df_holding = pd.read_excel(fpath, skiprows=3)
+        if 'Unnamed' in list(df_capital.columns)[1]:
+            df_capital = pd.read_excel(fpath, nrows=1, skiprows=1)
+            df_holding = pd.read_excel(fpath, skiprows=10)
+        return df_capital, df_holding
+
+    @staticmethod
+    def seccode2bsitem(str_code):
+        """
+        Transfer the code into b/s item of the account
+        :param str_code: 6-digit code
+        :return:
+        str
+            {
+            'st': stock, 股票
+            'ce': 现金及一般等价物,
+            'unknown': others
+            }
+        :note:
+        无B股股东账户， 在清洗持仓数据时，为考虑B股代码问题。
+
+        """
+        str_code = str_code.zfill(6)
+        if str_code[:3] in ['600', '601', '603', '688', '689']:  # 未考虑B股
+            return 'st'
+        elif str_code[:2] in ['00', '30']:
+            return 'st'
+        elif str_code[:3] in ['204', '511', '159', '519', '521', '660']:
+            return 'ce'
+        elif str_code[:2] in ['13']:
+            return 'ce'
+        else:
+            print(f'New security type found, please check {str_code} type and update the function "seccode2bsitem".')
+            return 'unknown'
+
+    def process_manually_downloaded_data(self, fpath_holding):
+        """
+        将指定路径人工下载的交易数据文件转换为dataframe，格式为数据文件原格式。
+
+        :param fpath_holding:
+        :return: DataFrame
+        """
         str_ext = os.path.splitext(fpath_holding)[1]
-        if str_ext in ['.xlsx', '.xls']:
-            df_capital = pd.read_excel(fpath_holding, nrows=1)
-            df_holding = pd.read_excel(fpath_holding, skiprows=3)
+        if str_ext == '.xlsx':
+            df_capital, df_holding = self.read_xlsx(fpath_holding)
+        elif str_ext == '.xls':
+            df_capital = self.read_lines(fpath_holding, nrows=2)
+            df_holding = self.read_lines(fpath_holding, skiprows=3)
         elif str_ext == '.csv':
             df_capital = pd.read_csv(fpath_holding, nrows=1, encoding='gbk',
-                                     dtype={'资产账户': str, '总资产': float, '总负债': float, '净资产': float,
-                                            '资金可用金': float})
-            df_holding = pd.read_csv(fpath_holding, skiprows=3, encoding='gbk',
-                                     dtype={'证券代码': str, '市值': float})
+                                     dtype={'资产账户': str, '总资产': float, '总负债': float,
+                                            '净资产': float, '资金可用金': float})
+            df_holding = pd.read_csv(fpath_holding, skiprows=3, encoding='gbk', dtype={'证券代码': str, '市值': float})
         else:
             raise TypeError('Unknown file type!')
-        print(df_capital)
-        print(df_holding)
+        return df_capital, df_holding
 
-    # def update_all_trddata(self):
-    #     """
-    #     f"{prdcode}_{accttype}_{acctid}_{content}}
-    #     :return:
-    #     """
-    #     cursor_find = self.col_myacctsinfo.find({'date': STR_DATE, 'accttype': 'c', 'rptmark': '1'})
-    #     for _ in cursor_find:
-    #         prdcode = _['prdcode']
-    #         accttype = _['accttype']
-    #         acctid = _['acctid']
-    #         colname = f'{prdcode}_{accttype}_{acctid}_b/s'
-    #         col_bs = self.db_trddata[colname]
-    #
-    #         fpath_holding = self.dirpath_raw_data + f'/{STR_DATE}' + _['fpath_holding']
-    #         dict_data_to_be_updated = self.__process_raw_data_cash(fpath_holding)
-    #         if col_bs.find_one({'date': STR_DATE, 'acctid': acctid}):
-    #             col_bs.update(dict_data_to_be_updated)
-    #         else:
-    #             col_bs.insert_one(dict_data_to_be_updated)
+    def update_manually_downloaded_data(self):
+        """
+        出于数据处理留痕及增强robust考虑，将原始数据按照原格式上传到mongoDB中备份
+        """
+        col_manually_downloaded_rawdata_capital = self.db_trddata['manually_downloaded_rawdata_capital']
+        col_manually_downloaded_rawdata_holding = self.db_trddata['manually_downloaded_rawdata_holding']
+        for _ in self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': '1'}):
+            fpath_holding = _['fpath_holding']
+            acctid = _['acctid']
+            prdcode = _['prdcode']
+            if '/' in fpath_holding:
+                fpath_holding = self.dirpath_raw_data + f'/{self.str_today}' + fpath_holding
+                df_capital, df_holding = self.process_manually_downloaded_data(fpath_holding)
+                list_dicts_capital = df_capital.to_dict('record')
+                for _ in list_dicts_capital:
+                    _['date'] = self.str_today
+                    _['acctid'] = acctid
+                col_manually_downloaded_rawdata_capital.delete_many({'date': self.str_today, 'acctid': acctid})
+                col_manually_downloaded_rawdata_capital.insert_many(list_dicts_capital)
+                print(f'{prdcode}: col manually downloaded data of capital updated.')
+                list_dicts_holding = df_holding.to_dict('record')
+                for _ in list_dicts_holding:
+                    _['date'] = self.str_today
+                    _['acctid'] = acctid
+                col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
+                col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
+                print(f'{prdcode}: col manually downloaded data of holding updated.')
 
     def update_trddata_f(self):
         """
@@ -141,7 +216,8 @@ class DBTradingData:
 
 if __name__ == '__main__':
     a = DBTradingData()
-    a.update_trddata_f()
+    a.update_manually_downloaded_data()
+    # a.update_trddata_f()
 
 
 

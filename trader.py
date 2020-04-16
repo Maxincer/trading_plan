@@ -144,6 +144,9 @@ class Trader:
             return None, None
 
 
+if __name__ == '__main__':
+    a = Trader('101003503')
+    print(a.query_holding()['list'])
 
 
 
