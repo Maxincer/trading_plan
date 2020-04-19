@@ -18,14 +18,18 @@ naming convention:
 function:
     1. initialize
     2. update
+
+Naming Convention:
+    1. 代码中的命名，遵循缩写可作为形容词，与其他名称连拼的规则；
+    2. 数据库中的命名，出于阅读便利考虑， 不可连拼，严格遵循蛇底式拼读法。
 """
 
 from datetime import datetime
 import os
 
-
 import pandas as pd
 import pymongo
+from WindPy import w
 
 from trader import Trader
 
@@ -39,6 +43,8 @@ class DBTradingData:
         self.col_myacctsinfo = self.db_basicinfo['myacctsinfo']
         self.db_trddata = self.client_mongo['trddata']
         self.dirpath_raw_data = 'D:/data/A_trading_data/1500+/A_result'
+        w.start()
+
 
     @staticmethod
     def read_lines(fpath, skiprows=0, nrows=0):
@@ -132,7 +138,7 @@ class DBTradingData:
         """
         col_manually_downloaded_rawdata_capital = self.db_trddata['manually_downloaded_rawdata_capital']
         col_manually_downloaded_rawdata_holding = self.db_trddata['manually_downloaded_rawdata_holding']
-        for _ in self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': '1'}):
+        for _ in self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1}):
             fpath_holding = _['fpath_holding']
             acctid = _['acctid']
             prdcode = _['prdcode']
@@ -145,21 +151,19 @@ class DBTradingData:
                     _['acctid'] = acctid
                 col_manually_downloaded_rawdata_capital.delete_many({'date': self.str_today, 'acctid': acctid})
                 col_manually_downloaded_rawdata_capital.insert_many(list_dicts_capital)
-                print(f'{prdcode}: col manually downloaded data of capital updated.')
                 list_dicts_holding = df_holding.to_dict('record')
                 for _ in list_dicts_holding:
                     _['date'] = self.str_today
                     _['acctid'] = acctid
                 col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
                 col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
-                print(f'{prdcode}: col manually downloaded data of holding updated.')
 
     def update_trddata_f(self):
         """
         f"{prdcode}_{accttype}_{acctid}_{content}}
         # todo 可用装饰器优化
         """
-        cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': '1'})
+        cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': 1})
         for _ in cursor_find:
             prdcode = _['prdcode']
             accttype = _['accttype']
@@ -271,7 +275,7 @@ class DBTradingData:
         更新cash account的两类col： 1. capital， 2. holding
         :return:
         """
-        colfind_c_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': '1'})
+        colfind_c_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
         for _ in colfind_c_acctid:
             if '/' in _['fpath_holding']:
                 acctid = _['acctid']
@@ -331,7 +335,7 @@ class DBTradingData:
         更新margin account的两类col：1. capital 2. holding
         :return:
         """
-        colfind_m_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'm', 'rptmark': '1'})
+        colfind_m_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'm', 'rptmark': 1})
         for _ in colfind_m_acctid:
             if '/' in _['fpath_holding']:
                 acctid = _['acctid']
@@ -339,9 +343,24 @@ class DBTradingData:
                 accttype = _['accttype']
                 colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
                 dict_capital = self.get_dict_capital_for_margin_acct(acctid)
+                dict_m_capital = {
+                    'date': self.str_today,
+                    'acctid': acctid,
+                    'ttasset': dict_capital['ttasset'],
+                    'af': dict_capital['available_fund'],
+                    'secmv': dict_capital['sec_mv']
+                }
+                if dict_capital['ttliability']:
+                    dict_m_capital['ttliability'] = dict_capital['ttliability']
+                else:
+                    dict_m_capital['ttliability'] = 'unknown'
+                if dict_capital['na']:
+                    dict_m_capital['nav'] = dict_capital['na']
+                else:
+                    dict_m_capital['nav'] = 'unknown'
                 col_m_capital = self.db_trddata[colname_capital]
                 col_m_capital.delete_many({'date': self.str_today, 'acctid': acctid})
-                col_m_capital.insert_one(dict_capital)
+                col_m_capital.insert_one(dict_m_capital)
                 colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
                 list_dicts_holding = self.get_list_dicts_holding(acctid)
                 col_m_holding = self.db_trddata[colname_holding]
@@ -352,13 +371,94 @@ class DBTradingData:
                     pass
         print('Margin account data update finished.')
 
+    def get_dict_capital_from_data_patch(self, acctid):
+        col_patch = self.db_trddata['manually_patch_raw_data_capital']
+        dict_patch = col_patch.find_one({'date': self.str_today, 'acctid': acctid})
+        return dict_patch
+
+    def update_manually_patch_rawdata(self):
+        fpath_data_patch = 'D:/data/A_trading_data/data_patch.xlsx'
+        df_data_patch_capital = pd.read_excel(fpath_data_patch, sheet_name='capital', dtype={'acctid': str})
+        list_dicts_patch_capital = df_data_patch_capital.to_dict('record')
+        for dict_patch_capital in list_dicts_patch_capital:
+            dict_patch_capital['date'] = self.str_today
+        self.db_trddata['manually_patch_rawdata_capital'].delete_many({'date': self.str_today})
+        if list_dicts_patch_capital:
+            self.db_trddata['manually_patch_rawdata_capital'].insert_many(list_dicts_patch_capital)
+        else:
+            pass
+        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'date': self.str_today})
+        df_data_patch_holding = pd.read_excel(fpath_data_patch, sheet_name='holding',
+                                              dtype={'acctid': str, 'sec_code': str, 'sec_vol': float})
+        dict_exchange_wcode = {'sse': '.SH', 'szse': '.SZ', 'cffex': '.CFE'}
+        if df_data_patch_holding.empty:
+            pass
+        else:
+            df_data_patch_holding['date'] = self.str_today
+            df_data_patch_holding['windcode_exchange'] = \
+                df_data_patch_holding['exchange'].apply(lambda x: dict_exchange_wcode[x.lower()])
+            df_data_patch_holding['windcode'] = \
+                df_data_patch_holding['sec_code'] + df_data_patch_holding['windcode_exchange']
+            list_windcodes = list(df_data_patch_holding['windcode'].values)
+            wss_close = w.wss(list_windcodes, 'close', f'tradeDate={self.str_today}')
+            list_closes = wss_close.Data[0]
+            df_data_patch_holding['close'] = list_closes
+            df_data_patch_holding['sec_mv'] = df_data_patch_holding['sec_vol'] * df_data_patch_holding['close']
+            list_dicts_patch_holding = df_data_patch_holding.to_dict('record')
+            self.db_trddata['manually_patch_rawdata_holding'].insert_many(list_dicts_patch_holding)
+        print('Collection manually_patch_rawdata_capital and collection manually_patch_rawdata_holding updated.')
+
+    def get_list_dicts_holding_from_data_patch(self, acctid):
+        """
+        需要load行情数据， 计算市值
+        :param acctid:
+        :return:
+        """
+        col_patch = self.db_trddata['manually_patch_raw_data_holding']
+        list_dicts_holding_from_data_patch = col_patch.find({'date': self.str_today, 'acctid': acctid},
+                                                            ['acctid', 'sec_code', 'sec_name', 'sec_vol', 'sec_mv'])
+        return list_dicts_holding_from_data_patch
+
+    def update_col_data_patch(self):
+        """
+        1. 上传A_data_patch.xlsx数据至mongo;
+        2. 从mongo中读取数据，整理至产品的正式数据表中（所以此步一定要置后执行）
+        col_data_patch: 数据补丁。主要补充下载数据中没有体现的重要数据。当日截面数据日更算法。
+        3. A_data_patch.xlsx中的数据，sec_code带有交易所编码，方便在行情数据库中查询行情。更好的做法是添加股东代码字段，区分市场。可优化。
+        """
+        colfind_patch_in_basicinfo = self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1,
+                                                                'patch_mark': 1})
+        for _ in colfind_patch_in_basicinfo:
+            acctid = _['acctid']
+            prdcode = _['prdcode']
+            accttype = _['accttype']
+            colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
+            col_capital = self.db_trddata[colname_capital]
+            dict_capital_patch = self.get_dict_capital_from_data_patch(acctid)
+            if dict_capital_patch:
+                col_capital.update_one({'date': self.str_today, 'acctid': acctid}, {'$set': dict_capital_patch})
+            else:
+                pass
+            colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
+            col_holding = self.db_trddata[colname_holding]
+            list_dicts_holding = self.get_list_dicts_holding_from_data_patch(acctid)
+            col_holding.delete_many({'date': self.str_today, 'acctid': acctid, 'patch_mark': 1})
+            if list_dicts_holding:
+                for dict_holding in list_dicts_holding:
+                    dict_holding['patch_mark'] = 1
+                col_holding.insert_many(list_dicts_holding)
+        print('Update patch data finished.')
+
 
 if __name__ == '__main__':
     a = DBTradingData()
-    # a.update_manually_downloaded_data()
+    a.update_manually_downloaded_data()
+    a.update_manually_patch_rawdata()
     # a.update_trddata_f()
     # a.update_trddata_c()
-    a.update_trddata_m()
+    # a.update_trddata_m()
+    a.update_col_data_patch()
+
 
 
 

@@ -25,7 +25,7 @@ class DatabaseBasicInfo:
 
     def update_myacctsinfo(self):
         df_myacctsinfo = pd.read_excel(self.fpath_basicinfo, sheet_name='myacctsinfo',
-                                       dtype={'prdcode': str, 'acctid': str, 'rptmark': str})
+                                       dtype={'prdcode': str, 'acctid': str, 'rptmark': int, 'patch_mark': int})
         list_dicts_to_be_inserted = df_myacctsinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['date'] = self.str_today
