@@ -372,7 +372,7 @@ class DBTradingData:
         print('Margin account data update finished.')
 
     def get_dict_capital_from_data_patch(self, acctid):
-        col_patch = self.db_trddata['manually_patch_raw_data_capital']
+        col_patch = self.db_trddata['manually_patch_rawdata_capital']
         dict_patch = col_patch.find_one({'date': self.str_today, 'acctid': acctid})
         return dict_patch
 
@@ -414,9 +414,8 @@ class DBTradingData:
         :param acctid:
         :return:
         """
-        col_patch = self.db_trddata['manually_patch_raw_data_holding']
-        list_dicts_holding_from_data_patch = col_patch.find({'date': self.str_today, 'acctid': acctid},
-                                                            ['acctid', 'sec_code', 'sec_name', 'sec_vol', 'sec_mv'])
+        col_patch = self.db_trddata['manually_patch_rawdata_holding']
+        list_dicts_holding_from_data_patch = list(col_patch.find({'date': self.str_today, 'acctid': acctid}))
         return list_dicts_holding_from_data_patch
 
     def update_col_data_patch(self):
@@ -426,8 +425,7 @@ class DBTradingData:
         col_data_patch: 数据补丁。主要补充下载数据中没有体现的重要数据。当日截面数据日更算法。
         3. A_data_patch.xlsx中的数据，sec_code带有交易所编码，方便在行情数据库中查询行情。更好的做法是添加股东代码字段，区分市场。可优化。
         """
-        colfind_patch_in_basicinfo = self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1,
-                                                                'patch_mark': 1})
+        colfind_patch_in_basicinfo = self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1, 'patch_mark': 1})
         for _ in colfind_patch_in_basicinfo:
             acctid = _['acctid']
             prdcode = _['prdcode']
@@ -436,6 +434,7 @@ class DBTradingData:
             col_capital = self.db_trddata[colname_capital]
             dict_capital_patch = self.get_dict_capital_from_data_patch(acctid)
             if dict_capital_patch:
+                del dict_capital_patch['_id']
                 col_capital.update_one({'date': self.str_today, 'acctid': acctid}, {'$set': dict_capital_patch})
             else:
                 pass
@@ -455,7 +454,7 @@ if __name__ == '__main__':
     a.update_manually_downloaded_data()
     a.update_manually_patch_rawdata()
     # a.update_trddata_f()
-    # a.update_trddata_c()
+    a.update_trddata_c()
     # a.update_trddata_m()
     a.update_col_data_patch()
 
