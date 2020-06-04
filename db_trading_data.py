@@ -157,7 +157,8 @@ class DBTradingData:
             raise TypeError('Unknown file type!')
         return df_capital, df_holding
 
-    def read_data_from_trdclient(self, fpath_capital, str_c_h_t_mark, data_source_type, accttype):
+    @staticmethod
+    def read_data_from_trdclient(fpath_capital, str_c_h_t_mark, data_source_type, accttype):
         """
         :param accttype: c: cash, m: margin, f: future
         :param fpath_capital:
@@ -165,26 +166,31 @@ class DBTradingData:
         :param data_source_type:
         :return:
         """
+        dict_rec = {}
         if str_c_h_t_mark == 'capital':
-            if data_source_type == 'huat_hx' and accttype=='c':
-
-
-
+            if data_source_type == 'huat_hx' and accttype == 'c':
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()[3:6]
+                    for dataline in list_datalines:
+                        list_data = dataline.strip().split(b'\t')
+                        for data in list_data:
+                            list_recdata = data.strip().decode('ANSI').split('：')
+                            dict_rec[list_recdata[0].strip()] = float(list_recdata[1])
+            elif data_source_type == 'huat_hx' and accttype == 'm':
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()[5:14]
+                    for dataline in list_datalines:
+                        list_data = dataline.strip().split(b'\t')
+                        for data in list_data:
+                            list_recdata = data.strip().decode('ANSI').split(':')
+                            dict_rec[list_recdata[0].strip()] = \
+                                (lambda x: '人民币' if x in ['人民币'] else float(list_recdata[1]))(list_recdata[1])
             else:
                 raise ValueError('Wrong data_source_type input in basic info!')
-
-
         elif str_c_h_t_mark == 'holding':
             pass
         else:
             raise ValueError('Wrong str_c_h_t_mark input!')
-
-
-
-
-
-
-
 
     def update_manually_downloaded_data(self):
         """
@@ -236,7 +242,6 @@ class DBTradingData:
                         _['acctid'] = acctid
                     col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
                     col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
-
 
 
     def update_trddata_f(self):
@@ -358,7 +363,6 @@ class DBTradingData:
         """
         colfind_c_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
         for _ in colfind_c_acctid:
-
             if '/' in _['fpath_holding']:
                 acctid = _['acctid']
                 prdcode = _['prdcode']
@@ -540,7 +544,8 @@ class DBTradingData:
 
 if __name__ == '__main__':
     task = DBTradingData()
-    task.run()
+    task.read_data_from_trdclient('D:/data/trdrec_from_trdclient/905_m_huat_5729.txt', 'capital', 'huat_hx', 'm')
+    # task.run()
 
 
 
