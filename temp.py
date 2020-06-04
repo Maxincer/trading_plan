@@ -1,4 +1,10 @@
-dict_1 = {'a': 1, 'b':2, 'c':3}
-list_1 = list(dict_1.values())
-print(list_1)
+import os
+import pandas as pd
+import pymongo
+
+client = pymongo.MongoClient('mongodb://localhost:27017/')
+col = client['basicinfo']['myacctsinfo']
+for _ in col.find():
+    print(_)
+
 

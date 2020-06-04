@@ -1,27 +1,52 @@
-#!usr/bin/env python3
-# coding:utf8
+#!usr/bin/env python37
+# coding:utf-8
 # Author: Maxincer
-# Datetime: 20200413T112000 +0800
+# Create Datetime: 20200413T112000 +0800
+# Update Datetime: 20200503T170000 +0800
 
 """
-DataBase "trddata" maintenance script.
-input:
-    1. MongoDB: localhost:27017, database: basicinfo
-naming convention:
-    1. all trading data is in Database trddata;
-    2. the collection should be named as f"{prdcode}_{accttype}_{acctid}_{content}}
+Update:
+Apply to protocol FIX 5.0 sp2
+
+出于开发速度及借鉴国际做法，暂将持仓数据分为 capital 与 holding 两类表
+
+DataBase "trddata" maintenance.
+
+Maintained DataBase:
+    1. DB: trddata
+        1. col: 各账户structured data
+        2. col: 上传的原始数据
+        3. All trading data is in the database.
+
+Naming Convention:
+    1. 代码中的命名，遵循缩写可作为形容词，与其他名称连拼的规则；
+    2. 数据库中的命名，出于阅读便利考虑， 不可连拼，严格遵循蛇底式拼读法。
+    3. the collection should be named as f"{prdcode}_{accttype}_{acctid}_{content}}
         1. content include:
             1. b/s_sheet
             2. holding
             3. trade
             4. transfer serial
-function:
-    1. initialize
-    2. update
 
-Naming Convention:
-    1. 代码中的命名，遵循缩写可作为形容词，与其他名称连拼的规则；
-    2. 数据库中的命名，出于阅读便利考虑， 不可连拼，严格遵循蛇底式拼读法。
+Input:
+    0. basic_info.xlsx
+    1. downloaded data from trading software.
+    2. manually patched data.
+
+Process:
+    循环遍历account basic info, 进行如下处理：
+        1. raw data upload.
+            1. read and upload downloaded data.
+                1. read general format: capital + security holding
+                2. read specific format: distinguished by broker and trading software.
+            2. read and upload patched data.
+            3. download and upload api data.
+
+        2. raw data to structured data.
+            1. structure cash account data.
+            2. structure margin account data.
+            3. structure future account data.
+
 """
 
 from datetime import datetime
@@ -36,15 +61,15 @@ from trader import Trader
 
 class DBTradingData:
     def __init__(self):
-        # self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200415'
+        self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200603'
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
-        self.db_basicinfo = self.client_mongo['basicinfo']
-        self.col_myacctsinfo = self.db_basicinfo['myacctsinfo']
+        self.col_myacctsinfo = self.client_mongo['basicinfo']['myacctsinfo']
         self.db_trddata = self.client_mongo['trddata']
-        self.dirpath_raw_data = 'D:/data/A_trading_data/1500+/A_result'
+        self.dirpath_data_from_trdclient = 'D:/data/data_from_trdclient'
+        self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
+                                     '918', '919', '920', '922', '925', '928', '930']
         w.start()
-
 
     @staticmethod
     def read_lines(fpath, skiprows=0, nrows=0):
@@ -132,31 +157,87 @@ class DBTradingData:
             raise TypeError('Unknown file type!')
         return df_capital, df_holding
 
+    def read_data_from_trdclient(self, fpath_capital, str_c_h_t_mark, data_source_type, accttype):
+        """
+        :param accttype: c: cash, m: margin, f: future
+        :param fpath_capital:
+        :param str_c_h_t_mark: ['capital', 'holding']
+        :param data_source_type:
+        :return:
+        """
+        if str_c_h_t_mark == 'capital':
+            if data_source_type == 'huat_hx' and accttype=='c':
+
+
+
+            else:
+                raise ValueError('Wrong data_source_type input in basic info!')
+
+
+        elif str_c_h_t_mark == 'holding':
+            pass
+        else:
+            raise ValueError('Wrong str_c_h_t_mark input!')
+
+
+
+
+
+
+
+
     def update_manually_downloaded_data(self):
         """
-        出于数据处理留痕及增强robust考虑，将原始数据按照原格式上传到mongoDB中备份
+        1. 出于数据处理留痕及增强robust考虑，将原始数据按照原格式上传到mongoDB中备份
+        2. 定义DataFilePath = ['fpath_capital_data'(source), 'fpath_holding_data'(source), 'fpath_trdrec_data(source)',]
+        3. acctinfo数据库中DataFilePath存在文件路径即触发文件数据的上传。
         """
         col_manually_downloaded_rawdata_capital = self.db_trddata['manually_downloaded_rawdata_capital']
         col_manually_downloaded_rawdata_holding = self.db_trddata['manually_downloaded_rawdata_holding']
         for _ in self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1}):
-            fpath_holding = _['fpath_holding']
-            acctid = _['acctid']
-            prdcode = _['prdcode']
-            if '/' in fpath_holding:
-                fpath_holding = self.dirpath_raw_data + f'/{self.str_today}' + fpath_holding
-                df_capital, df_holding = self.process_manually_downloaded_data(fpath_holding)
-                list_dicts_capital = df_capital.to_dict('record')
-                for _ in list_dicts_capital:
-                    _['date'] = self.str_today
-                    _['acctid'] = acctid
-                col_manually_downloaded_rawdata_capital.delete_many({'date': self.str_today, 'acctid': acctid})
-                col_manually_downloaded_rawdata_capital.insert_many(list_dicts_capital)
-                list_dicts_holding = df_holding.to_dict('record')
-                for _ in list_dicts_holding:
-                    _['date'] = self.str_today
-                    _['acctid'] = acctid
-                col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
-                col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
+            list_fpath_data = _['DataFilePath'][1:-1].split(',')
+            fpath_capital_relative = list_fpath_data[0]
+            fpath_holding_relative = list_fpath_data[1]
+            acctid = _['AcctID']
+            fpath_capital = os.path.join(self.dirpath_data_from_trdclient, fpath_capital_relative)
+            fpath_holding = os.path.join(self.dirpath_data_from_trdclient, fpath_holding_relative)
+            prdcode = _['PrdCode']
+            data_source_type = _['DataSourceType']
+            accttype = _['AcctType']
+
+            if prdcode in self.list_active_prdcodes:
+                if os.path.isfile(fpath_capital):
+                    df_capital = self.read_data_from_trdclient(fpath_capital, 'capital', data_source_type, accttype)
+                    df_capital, df_holding = self.process_manually_downloaded_data(fpath_capital)
+                    list_dicts_capital = df_capital.to_dict('record')
+                    for _ in list_dicts_capital:
+                        _['date'] = self.str_today
+                        _['acctid'] = acctid
+                    col_manually_downloaded_rawdata_capital.delete_many({'date': self.str_today, 'acctid': acctid})
+                    col_manually_downloaded_rawdata_capital.insert_many(list_dicts_capital)
+                    list_dicts_holding = df_holding.to_dict('record')
+                    for _ in list_dicts_holding:
+                        _['date'] = self.str_today
+                        _['acctid'] = acctid
+                    col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
+                    col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
+
+                if os.path.isfile(fpath_holding):
+                    df_capital, df_holding = self.process_manually_downloaded_data(fpath_holding)
+                    list_dicts_capital = df_capital.to_dict('record')
+                    for _ in list_dicts_capital:
+                        _['date'] = self.str_today
+                        _['acctid'] = acctid
+                    col_manually_downloaded_rawdata_capital.delete_many({'date': self.str_today, 'acctid': acctid})
+                    col_manually_downloaded_rawdata_capital.insert_many(list_dicts_capital)
+                    list_dicts_holding = df_holding.to_dict('record')
+                    for _ in list_dicts_holding:
+                        _['date'] = self.str_today
+                        _['acctid'] = acctid
+                    col_manually_downloaded_rawdata_holding.delete_many({'date': self.str_today, 'acctid': acctid})
+                    col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
+
+
 
     def update_trddata_f(self):
         """
@@ -277,6 +358,7 @@ class DBTradingData:
         """
         colfind_c_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
         for _ in colfind_c_acctid:
+
             if '/' in _['fpath_holding']:
                 acctid = _['acctid']
                 prdcode = _['prdcode']
@@ -304,7 +386,6 @@ class DBTradingData:
         华泰（hexin委托）可在查询收市负债中找到信息
 
         """
-
         col_manually_downloaded_data_capital = self.db_trddata['manually_downloaded_rawdata_capital']
         dict_capital_find = col_manually_downloaded_data_capital.find_one({'date': self.str_today, 'acctid': acctid})
         dict_capital = {'date': dict_capital_find['date'], 'acctid': dict_capital_find['acctid']}
@@ -448,15 +529,19 @@ class DBTradingData:
                 col_holding.insert_many(list_dicts_holding)
         print('Update patch data finished.')
 
+    def run(self):
+        self.update_manually_downloaded_data()
+        # update_manually_patch_rawdata()
+        # update_trddata_f()
+        # update_trddata_c()
+        # update_trddata_m()
+        # update_col_data_patch()
+
 
 if __name__ == '__main__':
-    a = DBTradingData()
-    a.update_manually_downloaded_data()
-    a.update_manually_patch_rawdata()
-    # a.update_trddata_f()
-    a.update_trddata_c()
-    # a.update_trddata_m()
-    a.update_col_data_patch()
+    task = DBTradingData()
+    task.run()
+
 
 
 
