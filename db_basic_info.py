@@ -7,7 +7,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.fpath_basicinfo = 'D:/data/A_trading_data/basic_info.xlsx'
+        self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
         self.col_acctinfo = db_basicinfo['acctinfo']
