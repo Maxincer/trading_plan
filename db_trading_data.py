@@ -308,7 +308,7 @@ class DBTradingData:
         获取self.today指定的acctid的capital数据, 被update_trddata_c调用
         :param acctid: 账户名
         :return:
-        dict
+        dicts
             dict data for mongodb
         """
         col_manually_downloaded_data_capital = self.db_trddata['manually_downloaded_rawdata_capital']
