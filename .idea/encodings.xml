@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="Encoding">
+    <file url="file://$PROJECT_DIR$/data/trdrec_from_trdclient/905_c_huat_5729.txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/data/trdrec_from_trdclient/906_c_gtja_1979.csv" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/data/trdrec_from_trdclient/906_m_gtja_6560.csv" charset="GBK" />
     <file url="file://$PROJECT_DIR$/vnpy/api/ctp/vnctpmd.pyd" charset="US-ASCII" />
   </component>
 </project>

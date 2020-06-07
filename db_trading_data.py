@@ -54,9 +54,8 @@ import os
 
 import pandas as pd
 import pymongo
-from WindPy import w
 
-from trader import Trader
+# from trader import Trader
 
 
 class DBTradingData:
@@ -69,7 +68,6 @@ class DBTradingData:
         self.dirpath_data_from_trdclient = 'D:/data/data_from_trdclient'
         self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
                                      '918', '919', '920', '922', '925', '928', '930']
-        w.start()
 
     @staticmethod
     def read_lines(fpath, skiprows=0, nrows=0):
@@ -158,25 +156,41 @@ class DBTradingData:
         return df_capital, df_holding
 
     @staticmethod
-    def read_data_from_trdclient(fpath_capital, str_c_h_t_mark, data_source_type, accttype):
+    def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
         """
+
+        :param list_datalines: consists of bytes
+        :param i_row: position of the columns
+        :param encoding:
+        :return: recdict
+        """
+        dict_rec = {}
+        list_keys = [data.decode(encoding) for data in list_datalines[i_row].strip().split(b',')]
+        list_values = [data.decode(encoding) for data in list_datalines[i_row + 1].strip().split(b',')]
+        dict_rec.update(dict(zip(list_keys, list_values)))
+        return dict_rec
+
+    def read_rawdata_from_trdclient(self, fpath_capital, str_c_h_t_mark, data_source_type, accttype):
+        """
+        从客户端下载数据，并进行初步清洗。为字符串格式。
         :param accttype: c: cash, m: margin, f: future
         :param fpath_capital:
         :param str_c_h_t_mark: ['capital', 'holding']
         :param data_source_type:
-        :return:
+        :return: dict_rec: dict_records, 原下载文件中的数据
         """
         dict_rec = {}
         if str_c_h_t_mark == 'capital':
-            if data_source_type == 'huat_hx' and accttype == 'c':
+            if data_source_type in ['huat_hx'] and accttype == 'c':
                 with open(fpath_capital, 'rb') as f:
-                    list_datalines = f.readlines()[3:6]
+                    list_datalines = f.readlines()[0:6]
                     for dataline in list_datalines:
                         list_data = dataline.strip().split(b'\t')
                         for data in list_data:
                             list_recdata = data.strip().decode('ANSI').split('：')
-                            dict_rec[list_recdata[0].strip()] = float(list_recdata[1])
-            elif data_source_type == 'huat_hx' and accttype == 'm':
+                            dict_rec[list_recdata[0].strip()] = list_recdata[1].strip()
+
+            elif data_source_type in ['huat_hx'] and accttype == 'm':
                 with open(fpath_capital, 'rb') as f:
                     list_datalines = f.readlines()[5:14]
                     for dataline in list_datalines:
@@ -184,13 +198,36 @@ class DBTradingData:
                         for data in list_data:
                             list_recdata = data.strip().decode('ANSI').split(':')
                             dict_rec[list_recdata[0].strip()] = \
-                                (lambda x: '人民币' if x in ['人民币'] else float(list_recdata[1]))(list_recdata[1])
+                                (lambda x: x if x.strip() in ['人民币'] else list_recdata[1].strip())(list_recdata[1])
+
+            elif data_source_type in ['gtja_fy'] and accttype == 'c':
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()[0:6]
+                    for dataline in list_datalines[0:4]:
+                        list_data = dataline.strip().split(b'\t')
+                        for data in list_data:
+                            list_recdata = data.strip().decode('gbk').split('：')
+                            dict_rec[list_recdata[0].strip()] = list_recdata[1].strip()
+                    list_keys = [data.decode('gbk') for data in list_datalines[4].strip().split(b',')][1:-1]
+                    list_values = [data.decode('gbk') for data in list_datalines[5].strip().split(b',')]
+                    dict_rec.update(dict(zip(list_keys, list_values)))
+
+            elif data_source_type in ['gtja_fy'] and accttype == 'm':
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()
+                    for dataline in list_datalines[0:4]:
+                        list_recdata = dataline.strip().decode('gbk').split('：')
+                        dict_rec[list_recdata[0].strip()] = list_recdata[1].strip()
+                    for i in [4, 6, 8, 10]:
+                        dict_rec.update(self.get_recdict_from_two_adjacent_lines(list_datalines, i, encoding='gbk'))
+
             else:
                 raise ValueError('Wrong data_source_type input in basic info!')
         elif str_c_h_t_mark == 'holding':
             pass
         else:
             raise ValueError('Wrong str_c_h_t_mark input!')
+        return dict_rec
 
     def update_manually_downloaded_data(self):
         """
@@ -244,64 +281,64 @@ class DBTradingData:
                     col_manually_downloaded_rawdata_holding.insert_many(list_dicts_holding)
 
 
-    def update_trddata_f(self):
-        """
-        f"{prdcode}_{accttype}_{acctid}_{content}}
-        # todo 可用装饰器优化
-        """
-        cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': 1})
-        for _ in cursor_find:
-            prdcode = _['prdcode']
-            accttype = _['accttype']
-            acctid = _['acctid']
-            colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
-            trader = Trader(acctid)
-            dict_res_capital = trader.query_account()
-            if dict_res_capital['success'] == 1:
-                dict_capital_to_be_update = dict_res_capital['list'][0]
-                dict_capital_to_be_update['date'] = self.str_today
-                col_f_capital = self.db_trddata[colname_capital]
-                col_f_capital.delete_many({'date': self.str_today})
-                col_f_capital.insert_one(dict_capital_to_be_update)
-                print(f'Query capital data of {acctid}({accttype}) succeed.')
-            else:
-                print(f'Query capital data of {acctid}({accttype}) failed.')
-
-            colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
-            dict_res_holding = trader.query_holding()
-            if dict_res_holding['success'] == 1:
-                list_dicts_holding_to_be_update = dict_res_holding['list']
-                for dict_holding_to_be_update in list_dicts_holding_to_be_update:
-                    dict_holding_to_be_update['date'] = self.str_today
-                    dict_holding_to_be_update['acctid'] = acctid
-                col_f_holding = self.db_trddata[colname_holding]
-                col_f_holding.delete_many({'date': self.str_today})
-                if list_dicts_holding_to_be_update:
-                    col_f_holding.insert_many(list_dicts_holding_to_be_update)
-                else:
-                    pass
-                print(f'Query holding data of {acctid}({accttype}) succeed.')
-
-            else:
-                print(f'Query holding data of {acctid}({accttype}) succeed.')
-
-            colname_trading = f'{prdcode}_{accttype}_{acctid}_trading'
-            dict_res_trading = trader.query_trading()
-            if dict_res_trading['success'] == 1:
-                list_dicts_trading_to_be_update = dict_res_trading['list']
-                for dict_trading_to_be_update in list_dicts_trading_to_be_update:
-                    dict_trading_to_be_update['date'] = self.str_today
-                    dict_trading_to_be_update['acctid'] = acctid
-                col_f_trading = self.db_trddata[colname_trading]
-                col_f_trading.delete_many({'date': self.str_today})
-                if list_dicts_trading_to_be_update:
-                    col_f_trading.insert_many(list_dicts_trading_to_be_update)
-                else:
-                    pass
-                print(f'Query trading data of {acctid}({accttype}) succeed.')
-
-            else:
-                print(f'Query trading data of {acctid}({accttype}) succeed.')
+    # def update_trddata_f(self):
+    #     """
+    #     f"{prdcode}_{accttype}_{acctid}_{content}}
+    #     # todo 可用装饰器优化
+    #     """
+    #     cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': 1})
+    #     for _ in cursor_find:
+    #         prdcode = _['prdcode']
+    #         accttype = _['accttype']
+    #         acctid = _['acctid']
+    #         colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
+    #         trader = Trader(acctid)
+    #         dict_res_capital = trader.query_account()
+    #         if dict_res_capital['success'] == 1:
+    #             dict_capital_to_be_update = dict_res_capital['list'][0]
+    #             dict_capital_to_be_update['date'] = self.str_today
+    #             col_f_capital = self.db_trddata[colname_capital]
+    #             col_f_capital.delete_many({'date': self.str_today})
+    #             col_f_capital.insert_one(dict_capital_to_be_update)
+    #             print(f'Query capital data of {acctid}({accttype}) succeed.')
+    #         else:
+    #             print(f'Query capital data of {acctid}({accttype}) failed.')
+    #
+    #         colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
+    #         dict_res_holding = trader.query_holding()
+    #         if dict_res_holding['success'] == 1:
+    #             list_dicts_holding_to_be_update = dict_res_holding['list']
+    #             for dict_holding_to_be_update in list_dicts_holding_to_be_update:
+    #                 dict_holding_to_be_update['date'] = self.str_today
+    #                 dict_holding_to_be_update['acctid'] = acctid
+    #             col_f_holding = self.db_trddata[colname_holding]
+    #             col_f_holding.delete_many({'date': self.str_today})
+    #             if list_dicts_holding_to_be_update:
+    #                 col_f_holding.insert_many(list_dicts_holding_to_be_update)
+    #             else:
+    #                 pass
+    #             print(f'Query holding data of {acctid}({accttype}) succeed.')
+    #
+    #         else:
+    #             print(f'Query holding data of {acctid}({accttype}) succeed.')
+    #
+    #         colname_trading = f'{prdcode}_{accttype}_{acctid}_trading'
+    #         dict_res_trading = trader.query_trading()
+    #         if dict_res_trading['success'] == 1:
+    #             list_dicts_trading_to_be_update = dict_res_trading['list']
+    #             for dict_trading_to_be_update in list_dicts_trading_to_be_update:
+    #                 dict_trading_to_be_update['date'] = self.str_today
+    #                 dict_trading_to_be_update['acctid'] = acctid
+    #             col_f_trading = self.db_trddata[colname_trading]
+    #             col_f_trading.delete_many({'date': self.str_today})
+    #             if list_dicts_trading_to_be_update:
+    #                 col_f_trading.insert_many(list_dicts_trading_to_be_update)
+    #             else:
+    #                 pass
+    #             print(f'Query trading data of {acctid}({accttype}) succeed.')
+    #
+    #         else:
+    #             print(f'Query trading data of {acctid}({accttype}) succeed.')
 
     def get_dict_capital_for_cash_acct(self, acctid):
         """
@@ -544,7 +581,7 @@ class DBTradingData:
 
 if __name__ == '__main__':
     task = DBTradingData()
-    task.read_data_from_trdclient('D:/data/trdrec_from_trdclient/905_m_huat_5729.txt', 'capital', 'huat_hx', 'm')
+    task.read_rawdata_from_trdclient('data/trdrec_from_trdclient/906_m_gtja_6560.csv', 'capital', 'gtja_fy', 'm')
     # task.run()
 
 
