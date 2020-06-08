@@ -19,11 +19,13 @@
       <w>datalines</w>
       <w>dbclient</w>
       <w>dirpath</w>
+      <w>ehtc</w>
       <w>facctids</w>
       <w>faccts</w>
       <w>fext</w>
       <w>findone</w>
       <w>fpath</w>
+      <w>hait</w>
       <w>hexin</w>
       <w>huat</w>
       <w>indexfuture</w>
@@ -48,6 +50,7 @@
       <w>secname</w>
       <w>secvol</w>
       <w>skiprows</w>
+      <w>swhy</w>
       <w>szse</w>
       <w>trdclient</w>
       <w>trddata</w>
@@ -59,6 +62,8 @@
       <w>windcode</w>
       <w>windcodes</w>
       <w>xlsx</w>
+      <w>yyyymmdd</w>
+      <w>zxjt</w>
     </words>
   </dictionary>
 </component>

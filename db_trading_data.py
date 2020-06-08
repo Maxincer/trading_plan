@@ -55,6 +55,7 @@ import os
 import pandas as pd
 import pymongo
 
+
 # from trader import Trader
 
 
@@ -173,6 +174,8 @@ class DBTradingData:
     def read_rawdata_from_trdclient(self, fpath_capital, str_c_h_t_mark, data_source_type, accttype):
         """
         从客户端下载数据，并进行初步清洗。为字符串格式。
+        已更新券商处理格式：
+            华泰核新，国君富易，
         :param accttype: c: cash, m: margin, f: future
         :param fpath_capital:
         :param str_c_h_t_mark: ['capital', 'holding']
@@ -181,22 +184,22 @@ class DBTradingData:
         """
         dict_rec = {}
         if str_c_h_t_mark == 'capital':
-            if data_source_type in ['huat_hx'] and accttype == 'c':
+            if data_source_type in ['huat_hx', 'hait_hx'] and accttype == 'c':
                 with open(fpath_capital, 'rb') as f:
                     list_datalines = f.readlines()[0:6]
                     for dataline in list_datalines:
                         list_data = dataline.strip().split(b'\t')
                         for data in list_data:
-                            list_recdata = data.strip().decode('ANSI').split('：')
+                            list_recdata = data.strip().decode('gbk').split('：')
                             dict_rec[list_recdata[0].strip()] = list_recdata[1].strip()
 
-            elif data_source_type in ['huat_hx'] and accttype == 'm':
+            elif data_source_type in ['huat_hx', 'hait_hx'] and accttype == 'm':
                 with open(fpath_capital, 'rb') as f:
                     list_datalines = f.readlines()[5:14]
                     for dataline in list_datalines:
                         list_data = dataline.strip().split(b'\t')
                         for data in list_data:
-                            list_recdata = data.strip().decode('ANSI').split(':')
+                            list_recdata = data.strip().decode('gbk').split(':')
                             dict_rec[list_recdata[0].strip()] = \
                                 (lambda x: x if x.strip() in ['人民币'] else list_recdata[1].strip())(list_recdata[1])
 
@@ -221,6 +224,31 @@ class DBTradingData:
                     for i in [4, 6, 8, 10]:
                         dict_rec.update(self.get_recdict_from_two_adjacent_lines(list_datalines, i, encoding='gbk'))
 
+            elif data_source_type in ['hait_ehtc'] and accttype == 'c':
+                df_read = pd.read_excel(fpath_capital, skiprows=1, nrows=1)
+                dict_rec = df_read.to_dict('records')[0]
+
+            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx'] and accttype == 'c':
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()
+                    dataline = list_datalines[0][8:]
+                    list_recdata = dataline.strip().decode('gbk').split()
+                    for recdata in list_recdata:
+                        list_recdata = recdata.split(':')
+                        dict_rec.update({list_recdata[0]: list_recdata[1]})
+
+            # todo 检查tdx margin
+            elif data_source_type in ['zx_tdx'] and accttype == 'm':
+                with open(fpath_capital, 'rb') as f:
+                    pass
+
+            elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
+                fpath_capital = fpath_capital.replace('<YYYYMMDD>', self.str_today)
+                with open(fpath_capital, 'rb') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].decode('gbk').split()
+                    list_values = list_datalines[1].decode('gbk').split()
+                    dict_rec.update(dict(zip(list_keys, list_values)))
             else:
                 raise ValueError('Wrong data_source_type input in basic info!')
         elif str_c_h_t_mark == 'holding':
@@ -581,7 +609,9 @@ class DBTradingData:
 
 if __name__ == '__main__':
     task = DBTradingData()
-    task.read_rawdata_from_trdclient('data/trdrec_from_trdclient/906_m_gtja_6560.csv', 'capital', 'gtja_fy', 'm')
+    dict_ = task.read_rawdata_from_trdclient('data/trdrec_from_trdclient/zxjt_alphabee/917/<YYYYMMDD>资金.txt',
+                                             'capital', 'zxjt_alphabee', 'c')
+    print(dict_)
     # task.run()
 
 
