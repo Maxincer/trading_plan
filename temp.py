@@ -4,7 +4,9 @@ import pymongo
 
 client = pymongo.MongoClient('mongodb://localhost:27017/')
 col = client['test']['test']
-a = list(col.find())
-print('a')
+dict_ = pd.DataFrame(columns=['1', '2', '3']).to_dict('records')
+print(dict_)
+
+
 
 

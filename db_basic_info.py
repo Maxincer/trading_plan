@@ -25,14 +25,23 @@ class DatabaseBasicInfo:
         print('Collection "myprdsinfo" has been updated.')
 
     def update_acctinfo(self):
-        df_acctinfo = pd.read_excel(self.fpath_basicinfo, sheet_name='acctinfo',
+        df_acctinfo = pd.read_excel(self.fpath_basicinfo,
+                                    sheet_name='acctinfo',
                                     dtype={
-                                           'PrdCode': str, 'AcctID': str, 'RptMark': int, 'PatchMark': int,
-                                           'AcctName': str, 'AcctIDSource': str, 'AcctStatus': str, 'AcctType': str,
-                                           'BrokerAlias': str, 'DataSourceType': str
-                                       },
-                                    converters={'DataFilePath': lambda x: None if str(x) == 'N/A' else str(x)}
+                                        'AcctIDByBroker': str,
+                                        'AcctIDByMXZ': str,
+                                        'AcctStatus': str,
+                                        'AcctType': str,
+                                        'BrokerAlias': str,
+                                        'DataDate': str,
+                                        'DataFilePath': str,
+                                        'DataSourceType': str,
+                                        'PatchMark': int,
+                                        'PrdCode': str,
+                                        'RptMark': int,
+                                    }
                                     )
+        df_acctinfo = df_acctinfo.where(df_acctinfo.notnull(), None)
         list_dicts_to_be_inserted = df_acctinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['DataDate'] = self.str_today
