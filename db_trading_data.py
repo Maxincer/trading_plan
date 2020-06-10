@@ -32,7 +32,7 @@ Input:
     0. basic_info.xlsx
     1. downloaded data from trading software.
     2. manually patched data.
-
+123456
 Process:
     循环遍历account basic info, 进行如下处理：
         1. raw data upload.
@@ -55,7 +55,7 @@ import os
 from openpyxl import load_workbook
 import pandas as pd
 import pymongo
-
+from WindPy import *
 
 # from trader import Trader
 
@@ -63,11 +63,13 @@ import pymongo
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        w.start()
         self.str_today = '20200603'
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.col_acctinfo = self.client_mongo['basicinfo']['acctinfo']
         self.db_trddata = self.client_mongo['trddata']
         self.dirpath_data_from_trdclient = 'data/trdrec_from_trdclient'
+        self.fpath_datapatch_relative = 'data/data_patch.xlsx'
         self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
                                      '918', '919', '920', '922', '925', '928', '930']
 
@@ -574,37 +576,51 @@ class DBTradingData:
         dict_patch = col_patch.find_one({'date': self.str_today, 'acctid': acctid})
         return dict_patch
 
-    def update_manually_patch_rawdata(self):
-        fpath_data_patch = 'D:/data/A_trading_data/data_patch.xlsx'
-        df_data_patch_capital = pd.read_excel(fpath_data_patch, sheet_name='capital', dtype={'acctid': str})
-        list_dicts_patch_capital = df_data_patch_capital.to_dict('record')
+    def update_manually_patchdata(self):
+        """
+        从data_patch中读取当日数据。
+        注意，data_patch中只记录最新的当日数据
+        证券市值：SecurityMarketValue: 有正负
+        """
+        df_datapatch_capital = pd.read_excel(self.fpath_datapatch_relative, sheet_name='capital',
+                                             dtype={'AcctIDByMXZ': str, 'NetAssetValue': float, 'TotalAsset': float,
+                                                    'TotalLiability': float, 'AvailableFund': float,
+                                                    'SecurityMarketValue': float})
+        df_datapatch_capital = df_datapatch_capital.where(df_datapatch_capital.notnull(), None)
+        list_dicts_patch_capital = df_datapatch_capital.to_dict('record')
         for dict_patch_capital in list_dicts_patch_capital:
-            dict_patch_capital['date'] = self.str_today
-        self.db_trddata['manually_patch_rawdata_capital'].delete_many({'date': self.str_today})
+            dict_patch_capital['DataDate'] = self.str_today
+        self.db_trddata['manually_patchdata_capital'].delete_many({'DataDate': self.str_today})
         if list_dicts_patch_capital:
-            self.db_trddata['manually_patch_rawdata_capital'].insert_many(list_dicts_patch_capital)
-        else:
+            self.db_trddata['manually_patchdata_capital'].insert_many(list_dicts_patch_capital)
+
+        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'DataDate': self.str_today})
+        df_datapatch_holding = pd.read_excel(self.fpath_datapatch_relative, sheet_name='holding',
+                                             dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
+                                                    'LongQty': float, 'ShortQty': float, 'PostCost': float},
+                                             converters={'SecurityIDSource': str.upper})
+        dict_exchange_wcode = {'SSE': '.SH', 'SZSE': '.SZ', 'CFFEX': '.CFE'}
+        if df_datapatch_holding.empty:
             pass
-        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'date': self.str_today})
-        df_data_patch_holding = pd.read_excel(fpath_data_patch, sheet_name='holding',
-                                              dtype={'acctid': str, 'sec_code': str, 'sec_vol': float})
-        dict_exchange_wcode = {'sse': '.SH', 'szse': '.SZ', 'cffex': '.CFE'}
-        if df_data_patch_holding.empty:
-            pass
         else:
-            df_data_patch_holding['date'] = self.str_today
-            df_data_patch_holding['windcode_exchange'] = \
-                df_data_patch_holding['exchange'].apply(lambda x: dict_exchange_wcode[x.lower()])
-            df_data_patch_holding['windcode'] = \
-                df_data_patch_holding['sec_code'] + df_data_patch_holding['windcode_exchange']
-            list_windcodes = list(df_data_patch_holding['windcode'].values)
-            wss_close = w.wss(list_windcodes, 'close', f'tradeDate={self.str_today}')
+            df_datapatch_holding['DataDate'] = self.str_today
+            df_datapatch_holding['WindCode_suffix'] = \
+                df_datapatch_holding['SecurityIDSource'].map(dict_exchange_wcode)
+            df_datapatch_holding['WindCode'] = \
+                df_datapatch_holding['SecurityID'] + df_datapatch_holding['WindCode_suffix']
+            list_windcodes = list(set(df_datapatch_holding['WindCode'].values))
+            str_windcodes = ','.join(list_windcodes)
+            wss_close = w.wss(str_windcodes, 'close', f'tradeDate={self.str_today}')
             list_closes = wss_close.Data[0]
-            df_data_patch_holding['close'] = list_closes
-            df_data_patch_holding['sec_mv'] = df_data_patch_holding['sec_vol'] * df_data_patch_holding['close']
-            list_dicts_patch_holding = df_data_patch_holding.to_dict('record')
+            dict_windcodes2close = dict(zip(list_windcodes, list_closes))
+            df_datapatch_holding['Close'] = df_datapatch_holding['WindCode'].map(dict_windcodes2close)
+            df_datapatch_holding['SecurityMarketValue_vector'] = (df_datapatch_holding['LongQty']
+                                                                  * df_datapatch_holding['Close']
+                                                                  - df_datapatch_holding['ShortQty']
+                                                                  * df_datapatch_holding['Close'])
+            list_dicts_patch_holding = df_datapatch_holding.to_dict('record')
             self.db_trddata['manually_patch_rawdata_holding'].insert_many(list_dicts_patch_holding)
-        print('Collection manually_patch_rawdata_capital and collection manually_patch_rawdata_holding updated.')
+        print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
 
     def get_list_dicts_holding_from_data_patch(self, acctid):
         """
@@ -647,8 +663,8 @@ class DBTradingData:
         print('Update patch data finished.')
 
     def run(self):
-        self.update_manually_downloaded_data()
-        # update_manually_patch_rawdata()
+        # self.update_manually_downloaded_data()
+        self.update_manually_patchdata()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()
