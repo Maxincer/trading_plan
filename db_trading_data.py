@@ -62,6 +62,8 @@ import pandas as pd
 import pymongo
 from WindPy import *
 
+from xlrd import open_workbook
+
 # from trader import Trader
 
 
@@ -222,12 +224,11 @@ class DBTradingData:
                                 (lambda x: x if x.strip() in ['人民币'] else list_recdata[1].strip())(list_recdata[1])
 
             elif data_source_type in ['gtja_fy'] and accttype in ['c', 'm']:
-                with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()
-                    for dataline in list_datalines[0:4]:
-                        list_recdata = dataline.strip().decode('gbk').split('：')
-                        dict_rec_capital[list_recdata[0].strip()] = list_recdata[1].strip()
-                    dict_rec_capital.update(self.get_recdict_from_two_adjacent_lines(list_datalines, 4, encoding='gbk'))
+                wb = open_workbook(fpath, encoding_override='gbk')
+                ws = wb.sheet_by_index(0)
+                list_keys = ws.row_values(5)
+                list_values = ws.row_values(6)
+                dict_rec_capital.update(dict(zip(list_keys, list_values)))
 
             elif data_source_type in ['hait_ehtc'] and accttype == 'c':
                 df_read = pd.read_excel(fpath, skiprows=1, nrows=1)
@@ -283,16 +284,13 @@ class DBTradingData:
                             list_ret.append(dict_rec_holding)
 
             elif data_source_type in ['gtja_fy'] and accttype in ['c', 'm']:
-                with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()[6:]
-                    list_keys = [x.decode('gbk') for x in list_datalines[0].strip().split(b',')]
-                    i_list_keys_length = len(list_keys)
-                    for dataline in list_datalines[1:]:
-                        list_data = dataline.strip().split(b',')
-                        if len(list_data) == i_list_keys_length:
-                            list_values = [x.decode('gbk') for x in list_data]
-                            dict_rec_holding = dict(zip(list_keys[2:], list_values[2:]))
-                            list_ret.append(dict_rec_holding)
+                wb = open_workbook(fpath, encoding_override='gbk')
+                ws = wb.sheet_by_index(0)
+                list_keys = ws.row_values(8)
+                for i in range(9, ws.nrows):
+                    list_values = ws.row_values(i)
+                    dict_rec_holding = dict(zip(list_keys, list_values))
+                    list_ret.append(dict_rec_holding)
 
             elif data_source_type in ['hait_ehtc'] and accttype == 'c':
                 wb_ehtc = load_workbook(fpath)
@@ -585,24 +583,19 @@ class DBTradingData:
         """
         从data_patch中读取当日数据。
         注意，data_patch中只记录最新的当日数据
+        注意，此步骤处理了原数据，将加工后的数据上传至数据库
         证券市值：SecurityMarketValue: 有正负
+        Process:
+            1. 先读取holding数据
+            2. 处理holding数据，生成市值数据（SMV）
+            3. 加入到capital中
+            4. 如果capital中的对应字段为None, 则使用上一步生成的LongPosAmt和ShortPosAmt作为SecurityMarketValue和TotalLiability
+            5. 如果capital中的对应字段不为空, 则使用该非空值替换
         """
-        df_datapatch_capital = pd.read_excel(self.fpath_datapatch_relative, sheet_name='capital',
-                                             dtype={'AcctIDByMXZ': str, 'NetAssetValue': float, 'TotalAsset': float,
-                                                    'TotalLiability': float, 'AvailableFund': float,
-                                                    'SecurityMarketValue': float})
-        df_datapatch_capital = df_datapatch_capital.where(df_datapatch_capital.notnull(), None)
-        list_dicts_patch_capital = df_datapatch_capital.to_dict('record')
-        for dict_patch_capital in list_dicts_patch_capital:
-            dict_patch_capital['DataDate'] = self.str_today
-        self.db_trddata['manually_patchdata_capital'].delete_many({'DataDate': self.str_today})
-        if list_dicts_patch_capital:
-            self.db_trddata['manually_patchdata_capital'].insert_many(list_dicts_patch_capital)
-
-        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'DataDate': self.str_today})
         df_datapatch_holding = pd.read_excel(self.fpath_datapatch_relative, sheet_name='holding',
                                              dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
-                                                    'LongQty': float, 'ShortQty': float, 'PostCost': float},
+                                                    'LongQty': float, 'ShortQty': float, 'PostCost': float,
+                                                    'SecurityType': str},
                                              converters={'SecurityIDSource': str.upper})
         df_datapatch_holding = df_datapatch_holding.where(df_datapatch_holding.notnull(), None)
         dict_exchange_wcode = {'SSE': '.SH', 'SZSE': '.SZ', 'CFFEX': '.CFE'}
@@ -624,8 +617,67 @@ class DBTradingData:
                                                                   * df_datapatch_holding['Close']
                                                                   - df_datapatch_holding['ShortQty']
                                                                   * df_datapatch_holding['Close'])
+            df_datapatch_holding['LongAmt'] = df_datapatch_holding['Close'] * df_datapatch_holding['LongQty']
+            df_datapatch_holding['ShortAmt'] = df_datapatch_holding['Close'] * df_datapatch_holding['ShortQty']
             list_dicts_patch_holding = df_datapatch_holding.to_dict('record')
             self.db_trddata['manually_patch_rawdata_holding'].insert_many(list_dicts_patch_holding)
+
+        df_datapatch_holding_sum_by_acctidbymxz = df_datapatch_holding.groupby(by=['AcctIDByMXZ', 'SecurityType']).sum()
+        dict_capital_field2dict_acctidbymxz_and_sectype2data = df_datapatch_holding_sum_by_acctidbymxz.to_dict()
+
+        df_datapatch_capital = pd.read_excel(self.fpath_datapatch_relative, sheet_name='capital',
+                                             dtype={'AcctIDByMXZ': str, 'NetAssetValue': float, 'TotalAsset': float,
+                                                    'TotalLiability': float, 'Cash': float,
+                                                    'SecurityMarketValue': float})
+        df_datapatch_capital = df_datapatch_capital.where(df_datapatch_capital.notnull(), None)
+        list_dicts_patch_capital = df_datapatch_capital.to_dict('record')
+        for dict_patch_capital in list_dicts_patch_capital:
+            acctidbymxz = dict_patch_capital['AcctIDByMXZ']
+            dict_patch_capital['DataDate'] = self.str_today
+            if dict_patch_capital['Cash'] is None:
+                raise ValueError(f'{acctidbymxz} has no Cash data!')
+            else:
+                cash = dict_patch_capital['Cash']
+            if dict_patch_capital['CashEquivalent'] is None:
+                acctidbymxz_and_sectype = (acctidbymxz, 'CE')  # cash equivalent
+                cash_equivalent = \
+                    dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
+            else:
+                cash_equivalent = dict_patch_capital['CashEquivalent']
+            if dict_patch_capital['LongAmt'] is None:
+                acctidbymxz_and_sectype = (acctidbymxz, 'CS')  # common stock
+                longamt = dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
+            else:
+                longamt = dict_patch_capital['LongAmt']
+            if dict_patch_capital['TotalLiability'] is None:
+                acctidbymxz_and_sectype = (acctidbymxz, 'ETF')
+                ttliability = dict_capital_field2dict_acctidbymxz_and_sectype2data['ShortAmt'][acctidbymxz_and_sectype]
+            else:
+                ttliability = dict_patch_capital['TotalLiability']
+            if dict_patch_capital['TotalAsset'] is None:
+                ttasset = cash + cash_equivalent + longamt
+            else:
+                ttasset = dict_patch_capital['TotalAsset']
+            if dict_patch_capital['NetAsset'] is None:
+                netasset = ttasset - ttliability
+            else:
+                netasset = dict_patch_capital['NetAsset']
+
+            dict_patch_capital.update({
+                'NetAsset': netasset,
+                'TotalAsset': ttasset,
+                'TotalLiability': ttliability,
+                'Cash': cash,
+                'CashEquivalent': cash_equivalent,
+                'LongAmt': longamt
+            })
+
+        self.db_trddata['manually_patchdata_capital'].delete_many({'DataDate': self.str_today})
+        if list_dicts_patch_capital:
+            self.db_trddata['manually_patchdata_capital'].insert_many(list_dicts_patch_capital)
+
+        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'DataDate': self.str_today})
+
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
 
     def update_capital_and_holding_formatted_by_internal_style(self):
@@ -654,14 +706,11 @@ class DBTradingData:
             patchmark = dict_acctinfo['PatchMark']
             datasourcetype = dict_acctinfo['DataSourceType']
 
-            # 资金账户计算
+            # 1.资金账户计算
+            # 1.1 交易客户端下载数据计算
             list_dicts_capital = self.db_trddata['manually_downloaded_rawdata_capital'].find(
                 {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
             )
-            if patchmark:
-                list_dicts_patchdata_capital = self.db_trddata['manually_patchdata_capital'].find(
-                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-                )
 
             list_dicts_capital_fmtted = []
             list_fields_af = ['可用', '可用金额', '资金可用金', '可用余额']
@@ -676,7 +725,11 @@ class DBTradingData:
                 flt_ttliability = 0
             else:
                 flt_ttliability = None
-            flt_net_asset = None
+            if accttype == 'c':
+                flt_net_asset = flt_ttasset
+            else:
+                flt_net_asset = None
+
             for dict_capital in list_dicts_capital:
                 for field_af in list_fields_af:
                     if field_af in dict_capital:
@@ -707,14 +760,28 @@ class DBTradingData:
                     'NetAsset': flt_net_asset,
                 }
                 list_dicts_capital_fmtted.append(dict_capital_fmtted)
+            # 1.2 patch data数据处理
+            if patchmark:
+                list_dicts_patchdata_capital = self.db_trddata['manually_patchdata_capital'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                )
 
+            # 2. 证券账户计算
+            # 2.1 交易客户端下载数据计算
+            # 2.2 patch data数据处理
+            # 3. 插入数据库
             self.db_trddata['capital_data_formatted_by_internal_style'].delete_many(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
             )
             if list_dicts_capital_fmtted:
                 self.db_trddata['capital_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
 
-        # 证券账户计算
+            self.db_trddata['holding_data_formatted_by_internal_style'].delete_many(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+            )
+            if list_dicts_holding_fmtted:
+                self.db_trddata['holding_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
+
 
 
 
@@ -767,7 +834,7 @@ class DBTradingData:
     def run(self):
         # self.update_manually_downloaded_data()
         self.update_manually_patchdata()
-        self.update_capital_and_holding_formatted_by_internal_style()
+        # self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()

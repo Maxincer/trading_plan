@@ -14,6 +14,7 @@
       <w>cffex</w>
       <w>colfind</w>
       <w>colname</w>
+      <w>colunms</w>
       <w>datafilepath</w>
       <w>datainline</w>
       <w>dataline</w>
@@ -35,11 +36,13 @@
       <w>huat</w>
       <w>indexfuture</w>
       <w>localholst</w>
+      <w>longamt</w>
       <w>maxincer</w>
       <w>maxinzhe</w>
       <w>myacctsifo</w>
       <w>myacctsinfo</w>
       <w>myprdsinfo</w>
+      <w>netasset</w>
       <w>nonetype</w>
       <w>nrows</w>
       <w>oracledb</w>
@@ -57,6 +60,7 @@
       <w>secmb</w>
       <w>secmv</w>
       <w>secname</w>
+      <w>sectype</w>
       <w>secvol</w>
       <w>skiprows</w>
       <w>swhy</w>
