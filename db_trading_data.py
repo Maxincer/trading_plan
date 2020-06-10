@@ -47,6 +47,11 @@ Process:
             2. structure margin account data.
             3. structure future account data.
 
+Note:
+    1. AcctType: cash, margin, future
+    2. ColType: capital, holding
+
+
 """
 
 from datetime import datetime
@@ -476,7 +481,7 @@ class DBTradingData:
         更新cash account的两类col： 1. capital， 2. holding
         :return:
         """
-        colfind_c_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
+        colfind_c_acctid = self.col_acctinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
         for _ in colfind_c_acctid:
             if '/' in _['fpath_holding']:
                 acctid = _['acctid']
@@ -599,6 +604,7 @@ class DBTradingData:
                                              dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
                                                     'LongQty': float, 'ShortQty': float, 'PostCost': float},
                                              converters={'SecurityIDSource': str.upper})
+        df_datapatch_holding = df_datapatch_holding.where(df_datapatch_holding.notnull(), None)
         dict_exchange_wcode = {'SSE': '.SH', 'SZSE': '.SZ', 'CFFEX': '.CFE'}
         if df_datapatch_holding.empty:
             pass
@@ -622,6 +628,102 @@ class DBTradingData:
             self.db_trddata['manually_patch_rawdata_holding'].insert_many(list_dicts_patch_holding)
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
 
+    def update_capital_and_holding_formatted_by_internal_style(self):
+        """
+        从原始数据表中读取数据，转换为内部格式并入库，以AcctIDByMXZ作为表名
+        需要找到字段名称的映射
+        操作层上，以实体账户为单位进行上传， 对于单个账户：
+            1. 传入rawdata
+            2. 传入patchdata
+            3. 整合并格式化
+
+        内部格式数据库字段说明：
+            1. col_capital:
+                1. AvailableFund: 可用资金
+                2. SecurityMarketValue: 证券市值
+                3. TotalAsset: 总资产
+                4. TotalLiability: 总负债
+                5. NetAsset: 净资产  (计算得出)
+
+        """
+        list_dicts_acctinfo = self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1})
+        for dict_acctinfo in list_dicts_acctinfo:
+            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
+            prdcode = dict_acctinfo['PrdCode']
+            accttype = dict_acctinfo['AcctType']
+            patchmark = dict_acctinfo['PatchMark']
+            datasourcetype = dict_acctinfo['DataSourceType']
+
+            # 资金账户计算
+            list_dicts_capital = self.db_trddata['manually_downloaded_rawdata_capital'].find(
+                {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+            )
+            if patchmark:
+                list_dicts_patchdata_capital = self.db_trddata['manually_patchdata_capital'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                )
+
+            list_dicts_capital_fmtted = []
+            list_fields_af = ['可用', '可用金额', '资金可用金', '可用余额']
+            list_fields_secmv = ['证券市值', '参考市值', '市值', '总市值', '股票市值', ]
+            list_fields_ttasset = ['总资产', '资产', '总 资 产', '账户总资产']
+            list_fields_ttliability = ['总负债', '负债', '合约负债总额']
+            list_fields_na = ['净资产']
+            flt_available_fund = None
+            flt_secmv = None
+            flt_ttasset = None
+            if accttype == 'c':
+                flt_ttliability = 0
+            else:
+                flt_ttliability = None
+            flt_net_asset = None
+            for dict_capital in list_dicts_capital:
+                for field_af in list_fields_af:
+                    if field_af in dict_capital:
+                        flt_available_fund = float(dict_capital[field_af])
+                for field_secmv in list_fields_secmv:
+                    if field_secmv in dict_capital:
+                        flt_secmv = float(dict_capital[field_secmv])
+                for field_ttasset in list_fields_ttasset:
+                    if field_ttasset in dict_capital:
+                        flt_ttasset = float(dict_capital[field_ttasset])
+                for field_ttliability in list_fields_ttliability:
+                    if field_ttliability in dict_capital:
+                        flt_ttliability = float(dict_capital[field_ttliability])
+                for field_na in list_fields_na:
+                    if field_na in dict_capital:
+                        flt_net_asset = float(dict_capital[field_na])
+                    else:
+                        flt_net_asset = flt_ttasset - flt_ttliability
+
+                dict_capital_fmtted = {
+                    'PrdCode': prdcode,
+                    'AcctIDByMXZ': acctidbymxz,
+                    'DataDate': self.str_today,
+                    'AvailableFund': flt_available_fund,
+                    'SecurityMarketValue': flt_secmv,
+                    'TotalAsset': flt_ttasset,
+                    'TotalLiability': flt_ttliability,
+                    'NetAsset': flt_net_asset,
+                }
+                list_dicts_capital_fmtted.append(dict_capital_fmtted)
+
+            self.db_trddata['capital_data_formatted_by_internal_style'].delete_many(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+            )
+            if list_dicts_capital_fmtted:
+                self.db_trddata['capital_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
+
+        # 证券账户计算
+
+
+
+
+
+
+
+
+
     def get_list_dicts_holding_from_data_patch(self, acctid):
         """
         需要load行情数据， 计算市值
@@ -639,7 +741,7 @@ class DBTradingData:
         col_data_patch: 数据补丁。主要补充下载数据中没有体现的重要数据。当日截面数据日更算法。
         3. A_data_patch.xlsx中的数据，sec_code带有交易所编码，方便在行情数据库中查询行情。更好的做法是添加股东代码字段，区分市场。可优化。
         """
-        colfind_patch_in_basicinfo = self.col_myacctsinfo.find({'date': self.str_today, 'rptmark': 1, 'patch_mark': 1})
+        colfind_patch_in_basicinfo = self.col_acctinfo.find({'date': self.str_today, 'rptmark': 1, 'patch_mark': 1})
         for _ in colfind_patch_in_basicinfo:
             acctid = _['acctid']
             prdcode = _['prdcode']
@@ -665,6 +767,7 @@ class DBTradingData:
     def run(self):
         # self.update_manually_downloaded_data()
         self.update_manually_patchdata()
+        self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()

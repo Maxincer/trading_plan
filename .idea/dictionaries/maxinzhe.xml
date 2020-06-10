@@ -19,6 +19,7 @@
       <w>dataline</w>
       <w>datalines</w>
       <w>datapatch</w>
+      <w>datasourcetype</w>
       <w>dbclient</w>
       <w>dirpath</w>
       <w>ehtc</w>
@@ -26,6 +27,8 @@
       <w>faccts</w>
       <w>fext</w>
       <w>findone</w>
+      <w>fmmted</w>
+      <w>fmtted</w>
       <w>fpath</w>
       <w>hait</w>
       <w>hexin</w>
@@ -41,6 +44,7 @@
       <w>nrows</w>
       <w>oracledb</w>
       <w>patchdata</w>
+      <w>patchmark</w>
       <w>pname</w>
       <w>prcs</w>
       <w>prdcode</w>
@@ -50,6 +54,7 @@
       <w>recdata</w>
       <w>rptmark</w>
       <w>seccode</w>
+      <w>secmb</w>
       <w>secmv</w>
       <w>secname</w>
       <w>secvol</w>
