@@ -81,41 +81,6 @@ class DBTradingData:
                                      '918', '919', '920', '922', '925', '928', '930']
 
     @staticmethod
-    def read_lines(fpath, skiprows=0, nrows=0):
-        with open(fpath, 'rb') as f:
-            list_list_datainline = []
-            list_lines = f.readlines()
-            if nrows:
-                for line in list_lines[skiprows:skiprows + nrows]:
-                    line = line.decode(encoding='gbk', errors='replace').replace('=', '').replace('"', '')
-                    list_datainline = line.split('\t')
-                    list_list_datainline.append(list_datainline)
-            else:
-                for line in list_lines[skiprows:]:
-                    line = line.decode(encoding='gbk', errors='replace').replace('=', '').replace('"', '')
-                    list_datainline = line.split('\t')
-                    list_list_datainline.append(list_datainline)
-            df_ret = pd.DataFrame(list_list_datainline[1:], columns=list_list_datainline[0])
-            return df_ret
-
-    @staticmethod
-    def read_xlsx(fpath):
-        """
-        本函数为业务函数， 面向读取xlsx格式的一揽子方案。
-        1. 正常情况下，xlsx正常读取；
-        2. 如925的情况，xlsx格式，首行为合并单元格： 资金
-
-        :param fpath:
-        :return:
-        """
-        df_capital = pd.read_excel(fpath, nrows=1)
-        df_holding = pd.read_excel(fpath, skiprows=3)
-        if 'Unnamed' in list(df_capital.columns)[1]:
-            df_capital = pd.read_excel(fpath, nrows=1, skiprows=1)
-            df_holding = pd.read_excel(fpath, skiprows=10)
-        return df_capital, df_holding
-
-    @staticmethod
     def seccode2bsitem(str_code):
         """
         Transfer the code into b/s item of the account
@@ -144,32 +109,9 @@ class DBTradingData:
             print(f'New security type found, please check {str_code} type and update the function "seccode2bsitem".')
             return 'unknown'
 
-    def process_manually_downloaded_data(self, fpath_holding):
-        """
-        将指定路径人工下载的交易数据文件转换为DataFrame，格式为数据文件原格式。
-
-        :param fpath_holding:
-        :return: DataFrame
-        """
-        str_ext = os.path.splitext(fpath_holding)[1]
-        if str_ext == '.xlsx':
-            df_capital, df_holding = self.read_xlsx(fpath_holding)
-        elif str_ext == '.xls':
-            df_capital = self.read_lines(fpath_holding, nrows=2)
-            df_holding = self.read_lines(fpath_holding, skiprows=3)
-        elif str_ext == '.csv':
-            df_capital = pd.read_csv(fpath_holding, nrows=1, encoding='gbk',
-                                     dtype={'资产账户': str, '总资产': float, '总负债': float,
-                                            '净资产': float, '资金可用金': float})
-            df_holding = pd.read_csv(fpath_holding, skiprows=3, encoding='gbk', dtype={'证券代码': str, '市值': float})
-        else:
-            raise TypeError('Unknown file type!')
-        return df_capital, df_holding
-
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
         """
-
         :param list_datalines: consists of bytes
         :param i_row: position of the columns
         :param encoding:
@@ -320,14 +262,14 @@ class DBTradingData:
             raise ValueError('Wrong str_c_h_t_mark input!')
         return list_ret
 
-    def update_manually_downloaded_data(self):
+    def update_rawdata(self):
         """
         1. 出于数据处理留痕及增强robust考虑，将原始数据按照原格式上传到mongoDB中备份
         2. 定义DataFilePath = ['fpath_capital_data'(source), 'fpath_holding_data'(source), 'fpath_trdrec_data(source)',]
         3. acctinfo数据库中DataFilePath存在文件路径即触发文件数据的上传。
         """
-        col_manually_downloaded_rawdata_capital = self.db_trddata['manually_downloaded_rawdata_capital']
-        col_manually_downloaded_rawdata_holding = self.db_trddata['manually_downloaded_rawdata_holding']
+        col_manually_downloaded_rawdata_capital = self.db_trddata['manually_rawdata_capital']
+        col_manually_downloaded_rawdata_holding = self.db_trddata['manually_rawdata_holding']
         for _ in self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}):
             prdcode = _['PrdCode']
             datafilepath = _['DataFilePath']
@@ -359,7 +301,6 @@ class DBTradingData:
                             col_manually_downloaded_rawdata.insert_many(list_dicts_rec)
                         else:
                             pass
-
 
 
     # def update_trddata_f(self):
@@ -421,30 +362,6 @@ class DBTradingData:
     #         else:
     #             print(f'Query trading data of {acctid}({accttype}) succeed.')
 
-    def get_dict_capital_for_cash_acct(self, acctid):
-        """
-        获取self.today指定的acctid的capital数据, 被update_trddata_c调用
-        :param acctid: 账户名
-        :return:
-        dicts
-            dict data for mongodb
-        """
-        col_manually_downloaded_data_capital = self.db_trddata['manually_downloaded_rawdata_capital']
-        dict_capital_findone = col_manually_downloaded_data_capital.find_one({'date': self.str_today, 'acctid': acctid})
-        dict_capital = {'date': dict_capital_findone['date'], 'acctid': dict_capital_findone['acctid'], }
-        list_fields_af = ['可用', '可用金额', '资金可用金']
-        for field_af in list_fields_af:
-            if field_af in dict_capital_findone:
-                dict_capital['available_fund'] = float(dict_capital_findone[field_af])
-        list_fields_mv = ['参考市值', '市值', '总市值']
-        for field_mv in list_fields_mv:
-            if field_mv in dict_capital_findone:
-                dict_capital['sec_mv'] = float(dict_capital_findone[field_mv])
-        list_fields_ttasset = ['总资产', '资产']
-        for field_ttasset in list_fields_ttasset:
-            if field_ttasset in dict_capital_findone:
-                dict_capital['ttasset'] = float(dict_capital_findone[field_ttasset])
-        return dict_capital
 
     def get_list_dicts_holding(self, acctid):
         col_manually_downloaded_data_holding = self.db_trddata['manually_downloaded_rawdata_holding']
@@ -584,14 +501,9 @@ class DBTradingData:
         从data_patch中读取当日数据。
         注意，data_patch中只记录最新的当日数据
         注意，此步骤处理了原数据，将加工后的数据上传至数据库
-        证券市值：SecurityMarketValue: 有正负
-        Process:
-            1. 先读取holding数据
-            2. 处理holding数据，生成市值数据（SMV）
-            3. 加入到capital中
-            4. 如果capital中的对应字段为None, 则使用上一步生成的LongPosAmt和ShortPosAmt作为SecurityMarketValue和TotalLiability
-            5. 如果capital中的对应字段不为空, 则使用该非空值替换
+        证券市值净值：SecurityMarketValue_vec: 是矢量，有正负
         """
+        # 上传holding data
         df_datapatch_holding = pd.read_excel(self.fpath_datapatch_relative, sheet_name='holding',
                                              dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
                                                     'LongQty': float, 'ShortQty': float, 'PostCost': float,
@@ -599,6 +511,7 @@ class DBTradingData:
                                              converters={'SecurityIDSource': str.upper})
         df_datapatch_holding = df_datapatch_holding.where(df_datapatch_holding.notnull(), None)
         dict_exchange_wcode = {'SSE': '.SH', 'SZSE': '.SZ', 'CFFEX': '.CFE'}
+        self.db_trddata['manually_patchdata_holding'].delete_many({'DataDate': self.str_today})
         if df_datapatch_holding.empty:
             pass
         else:
@@ -620,73 +533,204 @@ class DBTradingData:
             df_datapatch_holding['LongAmt'] = df_datapatch_holding['Close'] * df_datapatch_holding['LongQty']
             df_datapatch_holding['ShortAmt'] = df_datapatch_holding['Close'] * df_datapatch_holding['ShortQty']
             list_dicts_patch_holding = df_datapatch_holding.to_dict('record')
-            self.db_trddata['manually_patch_rawdata_holding'].insert_many(list_dicts_patch_holding)
+            self.db_trddata['manually_patchdata_holding'].insert_many(list_dicts_patch_holding)
 
-        df_datapatch_holding_sum_by_acctidbymxz = df_datapatch_holding.groupby(by=['AcctIDByMXZ', 'SecurityType']).sum()
-        dict_capital_field2dict_acctidbymxz_and_sectype2data = df_datapatch_holding_sum_by_acctidbymxz.to_dict()
-
+        # 上传capital data
         df_datapatch_capital = pd.read_excel(self.fpath_datapatch_relative, sheet_name='capital',
                                              dtype={'AcctIDByMXZ': str, 'NetAssetValue': float, 'TotalAsset': float,
                                                     'TotalLiability': float, 'Cash': float,
                                                     'SecurityMarketValue': float})
+        df_datapatch_capital['DataDate'] = self.str_today
         df_datapatch_capital = df_datapatch_capital.where(df_datapatch_capital.notnull(), None)
         list_dicts_patch_capital = df_datapatch_capital.to_dict('record')
-        for dict_patch_capital in list_dicts_patch_capital:
-            acctidbymxz = dict_patch_capital['AcctIDByMXZ']
-            dict_patch_capital['DataDate'] = self.str_today
-            if dict_patch_capital['Cash'] is None:
-                raise ValueError(f'{acctidbymxz} has no Cash data!')
-            else:
-                cash = dict_patch_capital['Cash']
-            if dict_patch_capital['CashEquivalent'] is None:
-                acctidbymxz_and_sectype = (acctidbymxz, 'CE')  # cash equivalent
-                cash_equivalent = \
-                    dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
-            else:
-                cash_equivalent = dict_patch_capital['CashEquivalent']
-            if dict_patch_capital['LongAmt'] is None:
-                acctidbymxz_and_sectype = (acctidbymxz, 'CS')  # common stock
-                longamt = dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
-            else:
-                longamt = dict_patch_capital['LongAmt']
-            if dict_patch_capital['TotalLiability'] is None:
-                acctidbymxz_and_sectype = (acctidbymxz, 'ETF')
-                ttliability = dict_capital_field2dict_acctidbymxz_and_sectype2data['ShortAmt'][acctidbymxz_and_sectype]
-            else:
-                ttliability = dict_patch_capital['TotalLiability']
-            if dict_patch_capital['TotalAsset'] is None:
-                ttasset = cash + cash_equivalent + longamt
-            else:
-                ttasset = dict_patch_capital['TotalAsset']
-            if dict_patch_capital['NetAsset'] is None:
-                netasset = ttasset - ttliability
-            else:
-                netasset = dict_patch_capital['NetAsset']
-
-            dict_patch_capital.update({
-                'NetAsset': netasset,
-                'TotalAsset': ttasset,
-                'TotalLiability': ttliability,
-                'Cash': cash,
-                'CashEquivalent': cash_equivalent,
-                'LongAmt': longamt
-            })
 
         self.db_trddata['manually_patchdata_capital'].delete_many({'DataDate': self.str_today})
         if list_dicts_patch_capital:
             self.db_trddata['manually_patchdata_capital'].insert_many(list_dicts_patch_capital)
 
-        self.db_trddata['manually_patch_rawdata_holding'].delete_many({'DataDate': self.str_today})
-
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
+
+    def get_close_from_wind(self):
+        """
+        停牌股票为前收价
+        """
+        wset_astock = w.wset("sectorconstituent", f"date={self.str_today};sectorid=a001010100000000")
+        list_str_wcodes_astock = wset_astock.Data[1]
+        list_str_wcodes_astock.append('510500.SH')  # 添加需要查询wind行情数据的标的
+        str_wcodes_astock = ','.join(list_str_wcodes_astock)
+        wss_astock = w.wss(str_wcodes_astock, 'sec_name,close', f'tradeDate={self.str_today};priceAdj=U;cycle=D')
+        df_mktdata_from_wind = pd.DataFrame(
+            wss_astock.Data, index=wss_astock.Fields, columns=wss_astock.Codes
+        ).T.reset_index().rename(columns={'index': 'WindCode', 'SEC_NAME': 'Symbol', 'CLOSE': 'Close'})
+        list_dicts_mktpatch = [
+            {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 100},
+            {'WindCode': '510500.SH', 'Symbol': '中证500ETF', 'Close': 100}
+        ]
+        df_mktdata_from_wind = df_mktdata_from_wind.append(list_dicts_mktpatch)
+        return df_mktdata_from_wind
+
+    @staticmethod
+    def get_official_sectype_from_code(str_code):
+        """
+        输入windcode， 返回该标的类型
+        参考：
+            1.上海证券交易所证券代码分配指南
+            2.深圳证券交易所数据接口规范ver 4.72_201505
+        """
+        list_split_wcode = str_code.split('.')
+        secid = list_split_wcode[0]
+        exchange = list_split_wcode[1]
+        if exchange in ['SH', 'SSE'] and len(secid) == 6:
+            if secid[0] == '0':
+                return '指数、国债'
+            elif secid[0] == '1':
+                return '债券'
+            elif secid[0] == '2':
+                return '债券回购'
+            elif secid[0] == '3':
+                return '优先股'
+            elif secid[0] == '5':
+                dict_map = {'500': '契约型封闭式基金', '501': '上市开放式基金', '502': '上市开放式基金',
+                            '505': '创新型封闭式证券投资基金', '510': '交易型开放式指数证券投资基金',
+                            '511': '债券交易型开放式指数基金、交易型货币市场基金', '512': '交易型开放式指数证券投资基金',
+                            '513': '交易型开放式指数证券投资基金', '515': '交易型开放式指数证券投资基金',
+                            '518': '商品交易型开放式证券投资基金', '519': '开放式基金申赎', '521': '开放式基金跨市场转托管',
+                            '522': '开放式基金跨市场转托管', '523': '开放式基金分红', '524': '开放式基金基金转换',
+                            '550': '基金', '580': '权证', '582': '权证行权'}
+                return dict_map[secid[:3]]
+            elif secid[:3] in ['600', '601', '603', '688']:
+                return 'A股'
+            elif secid[:3] == '689':
+                return '存托凭证'
+            elif secid[0] == '7':
+                return '非交易业务'
+            elif secid[0] == '8':
+                return '标准券、备用'
+            elif secid[0] == '9':
+                return 'B股'
+        elif exchange in ['SZ', 'SZSE'] and len(secid) == 6:
+            dict_map = {
+                '000': '主板A股',
+                '001': '主板A股',
+                '002': '中小企业板股票',
+                '003': '中小企业板股票',
+                '004': '中小企业板股票',
+                '030': '主板A股及中小企业板股票认购权证',
+                '031': '主板A股及中小企业板股票认购权证',
+                '032': '主板A股及中小企业板股票认购权证',
+                '036': '创业板股权激励计划涉及的员工认股权',
+                '037': '员工认股权',
+                '038': '员工认股权',
+                '039': '员工认股权',
+                '070': '主板A股增发,主板可转换公司债券申购',
+                '071': '主板A股增发,主板可转换公司债券申购',
+                '072': '中小企业板股票增发,中小企业板可转换公司债券申购',
+                '073': '中小企业板股票增发,中小企业板可转换公司债券申购',
+                '074': '中小企业板股票增发,中小企业板可转换公司债券申购',
+                '080': '主板A股配股优先权,主板可转换公司债券的优先权认购',
+                '081': '主板A股配股优先权,主板可转换公司债券的优先权认购',
+                '082': '中小企业板配股优先权,中小企业板可转换公司债券的优先权认购',
+                '083': '中小企业板配股优先权,中小企业板可转换公司债券的优先权认购',
+                '084': '中小企业板配股优先权,中小企业板可转换公司债券的优先权认购',
+                '115': '可分离交易的可转换公司债',
+                '120': '可转换公司债券',
+                '121': '可转换公司债券',
+                '122': '可转换公司债券',
+                '123': '可转换公司债券',
+                '124': '可转换公司债券',
+                '125': '可转换公司债券',
+                '126': '可转换公司债券',
+                '127': '可转换公司债券',
+                '128': '可转换公司债券',
+                '129': '可转换公司债券',
+                '131': '债券回购',
+                '140': '优先股',
+                '150': '分级基金子基金',
+                '151': '分级基金子基金',
+                '159': 'ETF',
+                '160': '开放式基金',
+                '161': '开放式基金',
+                '162': '开放式基金',
+                '163': '开放式基金',
+                '164': '开放式基金',
+                '165': '开放式基金',
+                '166': '开放式基金',
+                '167': '开放式基金',
+                '168': '开放式基金',
+                '169': '开放式基金',
+                '184': '封闭式证券投资基金',
+                '300': '创业板股票',
+                '301': '创业板股票',
+                '302': '创业板股票',
+                '303': '创业板股票',
+                '304': '创业板股票',
+                '305': '创业板股票',
+                '306': '创业板股票',
+                '307': '创业板股票',
+                '308': '创业板股票',
+                '309': '创业板股票',
+                '370': '创业板股票增发,创业板可转换公司债券申购',
+                '371': '创业板股票增发,创业板可转换公司债券申购',
+                '372': '创业板股票增发,创业板可转换公司债券申购',
+                '373': '创业板股票增发,创业板可转换公司债券申购',
+                '374': '创业板股票增发,创业板可转换公司债券申购',
+                '375': '创业板股票增发,创业板可转换公司债券申购',
+                '376': '创业板股票增发,创业板可转换公司债券申购',
+                '377': '创业板股票增发,创业板可转换公司债券申购',
+                '378': '创业板股票增发,创业板可转换公司债券申购',
+                '379': '创业板股票增发,创业板可转换公司债券申购',
+                '399': '指数'
+            }
+            return dict_map[secid[:3]]
+        else:
+            raise ValueError(f'Cannot get security type from code input: {str_code}')
+
+    @staticmethod
+    def get_mingshi_sectype_from_code(str_code):
+        """
+        实际使用的函数
+        :param str_code:
+        :return:
+            1. CE, Cash Equivalent, 货基，质押式国债逆回购
+            2. CS, Common Stock, 普通股
+        """
+        list_split_wcode = str_code.split('.')
+        secid = list_split_wcode[0]
+        exchange = list_split_wcode[1]
+        if exchange in ['SH', 'SSE'] and len(secid) == 6:
+            if secid in ['511990', '511830', '511880', '511850', '511660', '511810', '511690']:
+                return 'CE'
+            elif secid in ['204001']:
+                return 'CE'
+            elif secid[:3] in ['600', '601', '603', '688']:
+                return 'CS'
+            elif secid in ['510500']:
+                return '500ETF'
+            else:
+                raise ValueError(f'Cannot infer the security type of {str_code}.')
+        elif exchange in ['SZ', 'SZSE'] and len(secid) == 6:
+            if secid[:3] in ['000', '001', '002', '003', '004']:
+                return 'CS'
+            elif secid[:3] in ['115', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129']:
+                return '可转债'
+            elif secid[:3] in ['131']:
+                return 'CE'
+            elif secid in ['159001', '159005', '159003']:
+                return 'CE'
+            else:
+                raise ValueError(f'Cannot get security type from code input: {str_code}')
+        else:
+            raise ValueError(f'{str_code} has unknown exchange or digit number is not 6.')
 
     def update_capital_and_holding_formatted_by_internal_style(self):
         """
         从原始数据表中读取数据，转换为内部格式并入库，以AcctIDByMXZ作为表名
         需要找到字段名称的映射
         操作层上，以实体账户为单位进行上传， 对于单个账户：
-            1. 传入rawdata
-            2. 传入patchdata
+            1. 传入rawdata，并format
+            2. 根据acctinfo中的patchmark判定是否需要patch
+            3. 从数据库中读取patchdata
+            4. 整理patchdata并对formatted data进行修正
             3. 整合并格式化
 
         内部格式数据库字段说明：
@@ -697,17 +741,91 @@ class DBTradingData:
                 4. TotalLiability: 总负债
                 5. NetAsset: 净资产  (计算得出)
 
+            2. col_holding:
+                0. DataDate
+                1. AcctIDByMXZ
+                1. SecurityID
+                2. SecurityIDSource
+                3. SecurityType
+                4. Close
+                5. LongQty
+                6. ShortQty
+                7. LongAmt
+                8. ShortAmt
         """
-        list_dicts_acctinfo = self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1})
+        df_mktdata_from_wind = self.get_close_from_wind()
+        dict_wcode2close = df_mktdata_from_wind.set_index('WindCode').to_dict()['Close']
+
+        list_dicts_acctinfo = list(self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}))
         for dict_acctinfo in list_dicts_acctinfo:
-            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
             prdcode = dict_acctinfo['PrdCode']
+            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
             accttype = dict_acctinfo['AcctType']
             patchmark = dict_acctinfo['PatchMark']
             datasourcetype = dict_acctinfo['DataSourceType']
 
-            # 1.资金账户计算
-            # 1.1 交易客户端下载数据计算
+            # 1.整理holding
+            # 1.1 rawdata
+            list_dicts_holding = list(self.db_trddata['manually_rawdata_holding'].find(
+                {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+            ))
+            list_fields_secid = ['证券代码']
+            list_fields_symbol = ['证券名称']
+            list_fields_shareholder_acctid = ['股东帐户', '股东账号']
+            list_fields_positionqty = ['股票余额', '拥股数量', '证券余额']
+            list_dicts_holding_fmtted = []
+            for dict_holding in list_dicts_holding:
+                secid = None
+                secidsrc = None
+                symbol = None
+                longqty = None
+                for field_secid in list_fields_secid:
+                    if field_secid in dict_holding:
+                        secid = str(dict_holding[field_secid])
+
+                for field_shareholder_acctid in list_fields_shareholder_acctid:
+                    if field_shareholder_acctid in dict_holding:
+                        shareholder_acctid = dict_holding[field_shareholder_acctid]
+                        if shareholder_acctid[0].isalpha():
+                            secidsrc = 'SSE'
+                        if shareholder_acctid[0].isdigit():
+                            secidsrc = 'SZSE'
+
+                for field_symbol in list_fields_symbol:
+                    if field_symbol in dict_holding:
+                        symbol = str(dict_holding[field_symbol])
+
+                for field_positionqty in list_fields_positionqty:
+                    if field_positionqty in dict_holding:
+                        longqty = float(dict_holding[field_positionqty])
+
+                dict_holding_fmtted = {
+                    'DataDate': self.str_today,
+                    'AcctIDByMXZ': acctidbymxz,
+                    'SecurityID': secid,
+                    'Symbol': symbol,
+                    'SecurityIDSource': secidsrc,
+                    'LongQty': longqty,
+                }
+                list_dicts_holding_fmtted.append(dict_holding_fmtted)
+            df_holding_fmtted = pd.DataFrame(list_dicts_holding_fmtted)
+            df_holding_fmtted['WindCode_suffix'] = df_holding_fmtted['SecurityIDSource'].map({'SZSE': '.SZ',
+                                                                                              'SSE': '.SH'})
+            df_holding_fmtted['WindCode'] = df_holding_fmtted['SecurityID'] + df_holding_fmtted['WindCode_suffix']
+            df_holding_fmtted['SecurityType'] = df_holding_fmtted['WindCode'].apply(self.get_sectype_from_wcode)
+            df_holding_fmtted['Close'] = df_holding_fmtted['WindCode'].map(dict_wcode2close)
+            df_holding_fmtted['LongAmt'] = df_holding_fmtted['LongQty'] * df_holding_fmtted['Close']
+
+            print('done')
+
+
+            # 1.2 patchdata
+
+            # 2.整理capital
+            # 2.1 rawdata
+            # 2.2 patchdata
+
+
             list_dicts_capital = self.db_trddata['manually_downloaded_rawdata_capital'].find(
                 {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
             )
@@ -759,12 +877,60 @@ class DBTradingData:
                     'TotalLiability': flt_ttliability,
                     'NetAsset': flt_net_asset,
                 }
-                list_dicts_capital_fmtted.append(dict_capital_fmtted)
-            # 1.2 patch data数据处理
+            # 1.2 读取patchdata对rawdata进行修正
             if patchmark:
-                list_dicts_patchdata_capital = self.db_trddata['manually_patchdata_capital'].find(
+                list_dicts_patchdata_capital = list(self.db_trddata['manually_patchdata_capital'].find(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-                )
+                ))
+                df_patchdata_holding = pd.DataFrame(self.db_trddata['manually_patchdata_holding'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                ))
+                df_patchdata_holding_sum_by_acctidbymxz = df_patchdata_holding.groupby(
+                    by=['AcctIDByMXZ', 'SecurityType']).sum()
+                dict_capital_field2dict_acctidbymxz_and_sectype2data = df_patchdata_holding_sum_by_acctidbymxz.to_dict()
+
+                for dict_patchdata_capital in list_dicts_patchdata_capital:
+                    acctidbymxz = dict_patchdata_capital['AcctIDByMXZ']
+                    if dict_patchdata_capital['Cash'] is None:
+                        raise ValueError(f'{acctidbymxz} has no Cash data!')
+                    else:
+                        cash = dict_patchdata_capital['Cash']
+                    if dict_patchdata_capital['CashEquivalent'] is None:
+                        acctidbymxz_and_sectype = (acctidbymxz, 'CE')  # cash equivalent
+                        cash_equivalent = \
+                            dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
+                    else:
+                        cash_equivalent = dict_patchdata_capital['CashEquivalent']
+                    if dict_patchdata_capital['LongAmt'] is None:
+                        acctidbymxz_and_sectype = (acctidbymxz, 'CS')  # common stock
+                        longamt = dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][
+                            acctidbymxz_and_sectype]
+                    else:
+                        longamt = dict_patchdata_capital['LongAmt']
+                    if dict_patchdata_capital['TotalLiability'] is None:
+                        acctidbymxz_and_sectype = (acctidbymxz, 'ETF')
+                        ttliability = dict_capital_field2dict_acctidbymxz_and_sectype2data['ShortAmt'][
+                            acctidbymxz_and_sectype]
+                    else:
+                        ttliability = dict_patchdata_capital['TotalLiability']
+                    if dict_patchdata_capital['TotalAsset'] is None:
+                        ttasset = cash + cash_equivalent + longamt
+                    else:
+                        ttasset = dict_patchdata_capital['TotalAsset']
+                    if dict_patchdata_capital['NetAsset'] is None:
+                        netasset = ttasset - ttliability
+                    else:
+                        netasset = dict_patchdata_capital['NetAsset']
+
+                    dict_patchdata_capital.update({
+                        'NetAsset': netasset,
+                        'TotalAsset': ttasset,
+                        'TotalLiability': ttliability,
+                        'Cash': cash,
+                        'CashEquivalent': cash_equivalent,
+                        'LongAmt': longamt
+                    })
+
 
             # 2. 证券账户计算
             # 2.1 交易客户端下载数据计算
@@ -779,17 +945,8 @@ class DBTradingData:
             self.db_trddata['holding_data_formatted_by_internal_style'].delete_many(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
             )
-            if list_dicts_holding_fmtted:
-                self.db_trddata['holding_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
-
-
-
-
-
-
-
-
-
+            # if list_dicts_holding_fmtted:
+            #     self.db_trddata['holding_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
 
     def get_list_dicts_holding_from_data_patch(self, acctid):
         """
@@ -832,9 +989,9 @@ class DBTradingData:
         print('Update patch data finished.')
 
     def run(self):
-        # self.update_manually_downloaded_data()
-        self.update_manually_patchdata()
-        # self.update_capital_and_holding_formatted_by_internal_style()
+        # self.update_rawdata()
+        # self.update_manually_patchdata()
+        self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()

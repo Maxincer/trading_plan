@@ -9,6 +9,7 @@
       <w>accttype</w>
       <w>allfaccts</w>
       <w>alphabee</w>
+      <w>astock</w>
       <w>basicinfo</w>
       <w>bsitem</w>
       <w>cffex</w>
@@ -23,6 +24,7 @@
       <w>datasourcetype</w>
       <w>dbclient</w>
       <w>dirpath</w>
+      <w>dupatch</w>
       <w>ehtc</w>
       <w>facctids</w>
       <w>faccts</w>
@@ -37,8 +39,12 @@
       <w>indexfuture</w>
       <w>localholst</w>
       <w>longamt</w>
+      <w>longqty</w>
       <w>maxincer</w>
       <w>maxinzhe</w>
+      <w>mingshi</w>
+      <w>mktdata</w>
+      <w>mktpatch</w>
       <w>myacctsifo</w>
       <w>myacctsinfo</w>
       <w>myprdsinfo</w>
@@ -49,6 +55,7 @@
       <w>patchdata</w>
       <w>patchmark</w>
       <w>pname</w>
+      <w>positionqty</w>
       <w>prcs</w>
       <w>prdcode</w>
       <w>prdcodes</w>
@@ -57,11 +64,16 @@
       <w>recdata</w>
       <w>rptmark</w>
       <w>seccode</w>
+      <w>secid</w>
+      <w>secidsrc</w>
       <w>secmb</w>
       <w>secmv</w>
       <w>secname</w>
+      <w>sectorconstituent</w>
+      <w>sectorid</w>
       <w>sectype</w>
       <w>secvol</w>
+      <w>shortqty</w>
       <w>skiprows</w>
       <w>swhy</w>
       <w>szse</w>
@@ -72,8 +84,10 @@
       <w>ttliability</w>
       <w>tushare</w>
       <w>wcode</w>
+      <w>wcodes</w>
       <w>windcode</w>
       <w>windcodes</w>
+      <w>wset</w>
       <w>xlsx</w>
       <w>yyyymmdd</w>
       <w>zxjt</w>
