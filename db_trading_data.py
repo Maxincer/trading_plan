@@ -572,6 +572,7 @@ class DBTradingData:
     @staticmethod
     def get_official_sectype_from_code(str_code):
         """
+        未使用的函数，当作留底参考
         输入windcode， 返回该标的类型
         参考：
             1.上海证券交易所证券代码分配指南
@@ -694,6 +695,7 @@ class DBTradingData:
             1. CE, Cash Equivalent, 货基，质押式国债逆回购
             2. CS, Common Stock, 普通股
         """
+
         list_split_wcode = str_code.split('.')
         secid = list_split_wcode[0]
         exchange = list_split_wcode[1]
@@ -708,8 +710,10 @@ class DBTradingData:
                 return '500ETF'
             else:
                 raise ValueError(f'Cannot infer the security type of {str_code}.')
+
         elif exchange in ['SZ', 'SZSE'] and len(secid) == 6:
-            if secid[:3] in ['000', '001', '002', '003', '004']:
+            if secid[:3] in ['000', '001', '002', '003', '004', '300', '301', '302', '303', '304', '305', '306', '307',
+                             '308', '309']:
                 return 'CS'
             elif secid[:3] in ['115', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129']:
                 return '可转债'
@@ -719,6 +723,7 @@ class DBTradingData:
                 return 'CE'
             else:
                 raise ValueError(f'Cannot get security type from code input: {str_code}')
+
         else:
             raise ValueError(f'{str_code} has unknown exchange or digit number is not 6.')
 
@@ -812,9 +817,30 @@ class DBTradingData:
             df_holding_fmtted['WindCode_suffix'] = df_holding_fmtted['SecurityIDSource'].map({'SZSE': '.SZ',
                                                                                               'SSE': '.SH'})
             df_holding_fmtted['WindCode'] = df_holding_fmtted['SecurityID'] + df_holding_fmtted['WindCode_suffix']
-            df_holding_fmtted['SecurityType'] = df_holding_fmtted['WindCode'].apply(self.get_sectype_from_wcode)
+            df_holding_fmtted['SecurityType'] = df_holding_fmtted['WindCode'].apply(self.get_mingshi_sectype_from_code)
             df_holding_fmtted['Close'] = df_holding_fmtted['WindCode'].map(dict_wcode2close)
             df_holding_fmtted['LongAmt'] = df_holding_fmtted['LongQty'] * df_holding_fmtted['Close']
+            df_holding_sectype_longamt = df_holding_fmtted.loc[:, ['SecurityType', 'LongAmt']].copy()
+            df_holding_amt_sum_by_sectype = df_holding_sectype_longamt.groupby(by='SecurityType').sum()
+            dict_longamt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
+            if 'LongAmt' in dict_longamt2dict_sectype2amt:
+                dict_sectype2amt = dict_longamt2dict_sectype2amt['LongAmt']
+                if 'CS' in dict_sectype2amt:
+                    stock_mv = dict_sectype2amt['CS']
+                else:
+                    stock_mv = 0
+                if '500ETF' in dict_sectype2amt:
+                    etf500 = dict_sectype2amt['500ETF']
+                else:
+                    etf500 = 0
+                if 'CE' in dict_sectype2amt:
+                    ce = dict_sectype2amt['CE']
+                else:
+                    ce = 0
+            else:
+                stock_mv = 0
+                etf500 = 0
+                ce = 0
 
             print('done')
 
