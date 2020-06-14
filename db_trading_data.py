@@ -767,7 +767,6 @@ class DBTradingData:
             acctidbymxz = dict_acctinfo['AcctIDByMXZ']
             accttype = dict_acctinfo['AcctType']
             patchmark = dict_acctinfo['PatchMark']
-            datasourcetype = dict_acctinfo['DataSourceType']
 
             # 1.整理holding
             # 1.1 rawdata
@@ -783,7 +782,8 @@ class DBTradingData:
                 secid = None
                 secidsrc = None
                 symbol = None
-                longqty = None
+                longqty = 0
+                shortqty = 0
                 for field_secid in list_fields_secid:
                     if field_secid in dict_holding:
                         secid = str(dict_holding[field_secid])
@@ -811,41 +811,119 @@ class DBTradingData:
                     'Symbol': symbol,
                     'SecurityIDSource': secidsrc,
                     'LongQty': longqty,
+                    'ShortQty': shortqty,
                 }
                 list_dicts_holding_fmtted.append(dict_holding_fmtted)
-            df_holding_fmtted = pd.DataFrame(list_dicts_holding_fmtted)
-            df_holding_fmtted['WindCode_suffix'] = df_holding_fmtted['SecurityIDSource'].map({'SZSE': '.SZ',
-                                                                                              'SSE': '.SH'})
-            df_holding_fmtted['WindCode'] = df_holding_fmtted['SecurityID'] + df_holding_fmtted['WindCode_suffix']
-            df_holding_fmtted['SecurityType'] = df_holding_fmtted['WindCode'].apply(self.get_mingshi_sectype_from_code)
-            df_holding_fmtted['Close'] = df_holding_fmtted['WindCode'].map(dict_wcode2close)
-            df_holding_fmtted['LongAmt'] = df_holding_fmtted['LongQty'] * df_holding_fmtted['Close']
-            df_holding_sectype_longamt = df_holding_fmtted.loc[:, ['SecurityType', 'LongAmt']].copy()
-            df_holding_amt_sum_by_sectype = df_holding_sectype_longamt.groupby(by='SecurityType').sum()
-            dict_longamt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
-            if 'LongAmt' in dict_longamt2dict_sectype2amt:
-                dict_sectype2amt = dict_longamt2dict_sectype2amt['LongAmt']
-                if 'CS' in dict_sectype2amt:
-                    stock_mv = dict_sectype2amt['CS']
-                else:
-                    stock_mv = 0
-                if '500ETF' in dict_sectype2amt:
-                    etf500 = dict_sectype2amt['500ETF']
-                else:
-                    etf500 = 0
-                if 'CE' in dict_sectype2amt:
-                    ce = dict_sectype2amt['CE']
-                else:
-                    ce = 0
-            else:
-                stock_mv = 0
-                etf500 = 0
-                ce = 0
-
-            print('done')
-
 
             # 1.2 patchdata
+            # patchdata 逻辑： 是增量补充，而不是余额覆盖
+            #   1. 检验是否有patchmark，有则进入patch算法，无则跳过。
+            #   2. 格式化patch数据
+            #   3. 将 patch data添加至holding中
+            #   3. 检查capital中各字段是否为NoneType，是则使用由holding_patchdata中推算出来的值，否则使用当前值（capital）。
+            #   4. 将rawdata 与 patchdata 相加，得到patched data。
+
+            list_dicts_holding_patchdata_fmtted = []
+            if patchmark:
+                list_dicts_holding_patchdata = list(self.db_trddata['manually_patchdata_holding'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}
+                ))
+                # todo 需改进自定义标的持仓价格和持仓金额的情况（eg.场外非标, 下层基金）
+                for dict_holding_patchdata in list_dicts_holding_patchdata:
+                    secid = dict_holding_patchdata['SecurityID']
+                    secidsrc = dict_holding_patchdata['SecurityIDSource']
+                    symbol = None
+                    if 'Symbol' in dict_holding_patchdata:
+                        symbol = dict_holding_patchdata
+                    longqty = 0
+                    if 'LongQty' in dict_holding_patchdata:
+                        longqty = dict_holding_patchdata['LongQty']
+                    shortqty = 0
+                    if 'ShortQty' in dict_holding_patchdata:
+                        shortqty = dict_holding_patchdata['ShortQty']
+                    note = None
+                    if 'Note' in dict_holding_patchdata:
+                        note = str(dict_holding_patchdata['Note'])
+                    dict_holding_patchdata_fmtted = {
+                        'DataDate': self.str_today,
+                        'AcctIDByMXZ': acctidbymxz,
+                        'SecurityID': secid,
+                        'Symbol': symbol,
+                        'SecurityIDSource': secidsrc,
+                        'LongQty': longqty,
+                        'ShortQty': shortqty,
+                        'Note': note
+                    }
+                    list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata_fmtted)
+            list_dicts_holding_fmtted_patched = list_dicts_holding + list_dicts_holding_patchdata_fmtted
+            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched)
+            df_holding_fmtted_patched['WindCode_suffix'] = (df_holding_fmtted_patched['SecurityIDSource']
+                                                            .map({'SZSE': '.SZ', 'SSE': '.SH'}))
+            df_holding_fmtted_patched['WindCode'] = (df_holding_fmtted_patched['SecurityID']
+                                                     + df_holding_fmtted_patched['WindCode_suffix'])
+            df_holding_fmtted_patched['SecurityType'] = (df_holding_fmtted_patched['WindCode']
+                                                         .apply(self.get_mingshi_sectype_from_code))
+            df_holding_fmtted_patched['Close'] = df_holding_fmtted_patched['WindCode'].map(dict_wcode2close)
+            df_holding_fmtted_patched['LongAmt'] = (df_holding_fmtted_patched['LongQty']
+                                                    * df_holding_fmtted_patched['Close'])
+            df_holding_fmtted_patched['ShortAmt'] = (df_holding_fmtted_patched['ShortAmt']
+                                                     * df_holding_fmtted_patched['Close'])
+            df_holding_fmtted_patched['NetAmt'] = (df_holding_fmtted_patched['LongAmt']
+                                                   - df_holding_fmtted_patched['ShortAmt'])
+            list_dicts_holding_fmtted_patched = df_holding_fmtted_patched.to_dict('records')
+            self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+            self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
+
+            # 1.整理capital: 出于稳健性考量，股票市值由持仓数据计算得出
+            # 1.1 raw data, holding data
+            # 1.2 patch data
+            df_holding_sectype_netamt = df_holding_fmtted_patched.loc[:, ['SecurityType', 'NetAmt']].copy()
+            df_holding_amt_sum_by_sectype = df_holding_sectype_netamt.groupby(by='SecurityType').sum()
+            dict_longamt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
+
+            stock_amt = 0
+            etf500_amt = 0
+            ce_amt = 0
+            if 'NetAmt' in dict_longamt2dict_sectype2amt:
+                dict_sectype2amt = dict_longamt2dict_sectype2amt['NetAmt']
+                if 'CS' in dict_sectype2amt:
+                    stock_amt = dict_sectype2amt['CS']
+                if '500ETF' in dict_sectype2amt:
+                    etf500_amt = dict_sectype2amt['500ETF']
+                if 'CE' in dict_sectype2amt:
+                    ce_amt = dict_sectype2amt['CE']
+
+                stock_amt_patch = 0
+                etf500_amt_patch = 0
+                ce_amt_patch = 0
+
+
+
+
+
+
+
+
+
+
+                if not df_holding_patchdata.empty:
+
+                    df_holding_patchdata_fmtted =
+                    df_holding_patchdata_sum_by_sectype = df_holding_patchdata.groupby('SecurityType').sum()
+                    dict_sectype2amt_patch = df_holding_patchdata_sum_by_sectype['SecurityMarketValue_vector']
+                    if 'CS' in dict_sectype2amt_patch:
+                        stock_amt_patch = dict_sectype2amt_patch['CS']
+                    if '500ETF' in dict_sectype2amt_patch:
+                        etf500_amt_patch = dict_sectype2amt_patch['500ETF']
+                    if 'CE' in dict_sectype2amt_patch:
+                        ce_amt_patch = dict_sectype2amt_patch['CE']
+
+
+
+
+            stock_amt_patched = stock_amt + stock_amt_patch
+            etf500_amt_patched = etf500_amt + etf500_amt_patch
+            ce_amt_patched = ce_amt + ce_amt_patch
 
             # 2.整理capital
             # 2.1 rawdata
