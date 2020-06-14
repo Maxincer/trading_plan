@@ -874,114 +874,109 @@ class DBTradingData:
             self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
             self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
 
-            # 1.整理capital: 出于稳健性考量，股票市值由持仓数据计算得出
-            # 1.1 raw data, holding data
-            # 1.2 patch data
-            df_holding_sectype_netamt = df_holding_fmtted_patched.loc[:, ['SecurityType', 'NetAmt']].copy()
-            df_holding_amt_sum_by_sectype = df_holding_sectype_netamt.groupby(by='SecurityType').sum()
-            dict_longamt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
+            # 2.整理b/s: 出于稳健性考量，股票市值由持仓数据计算得出: holding data + raw data + patch data
+            # 将现金代替可用，重点计算
+            # Cash, CashEquivalent, CompositeLongAmt, Asset, ShortAmt, Liability, ApproximateNetAsset
+            # patch data采用余额覆盖模式。（holding data采用增量添加模式）
 
-            stock_amt = 0
-            etf500_amt = 0
-            ce_amt = 0
-            if 'NetAmt' in dict_longamt2dict_sectype2amt:
-                dict_sectype2amt = dict_longamt2dict_sectype2amt['NetAmt']
-                if 'CS' in dict_sectype2amt:
-                    stock_amt = dict_sectype2amt['CS']
-                if '500ETF' in dict_sectype2amt:
-                    etf500_amt = dict_sectype2amt['500ETF']
-                if 'CE' in dict_sectype2amt:
-                    ce_amt = dict_sectype2amt['CE']
+            # 2.1 holding data
+            df_holding_sectype_amt = (df_holding_fmtted_patched
+                                      .loc[:, ['SecurityType', 'LongAmt', 'ShortAmt', 'NetAmt']]
+                                      .copy())
+            df_holding_amt_sum_by_sectype = df_holding_sectype_amt.groupby(by='SecurityType').sum()
+            dict_amt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
+            stock_longamt = 0
+            etf500_longamt = 0
+            ce_longamt = 0
+            if 'LongAmt' in dict_amt2dict_sectype2amt:
+                dict_sectype2longamt = dict_amt2dict_sectype2amt['LongAmt']
+                if 'CS' in dict_sectype2longamt:
+                    stock_longamt = dict_sectype2longamt['CS']
+                if '500ETF' in dict_sectype2longamt:
+                    etf500_longamt = dict_sectype2longamt['500ETF']
+                if 'CE' in dict_sectype2longamt:
+                    ce_longamt = dict_sectype2longamt['CE']
 
-                stock_amt_patch = 0
-                etf500_amt_patch = 0
-                ce_amt_patch = 0
-
-
-
-
-
-
-
-
-
-
-                if not df_holding_patchdata.empty:
-
-                    df_holding_patchdata_fmtted =
-                    df_holding_patchdata_sum_by_sectype = df_holding_patchdata.groupby('SecurityType').sum()
-                    dict_sectype2amt_patch = df_holding_patchdata_sum_by_sectype['SecurityMarketValue_vector']
-                    if 'CS' in dict_sectype2amt_patch:
-                        stock_amt_patch = dict_sectype2amt_patch['CS']
-                    if '500ETF' in dict_sectype2amt_patch:
-                        etf500_amt_patch = dict_sectype2amt_patch['500ETF']
-                    if 'CE' in dict_sectype2amt_patch:
-                        ce_amt_patch = dict_sectype2amt_patch['CE']
+            stock_shortamt = 0
+            etf500_shortamt = 0
+            if 'shortAmt' in dict_amt2dict_sectype2amt:
+                dict_sectype2shortamt = dict_amt2dict_sectype2amt['shortAmt']
+                if 'CS' in dict_sectype2shortamt:
+                    stock_shortamt = dict_sectype2shortamt['CS']
+                if '500ETF' in dict_sectype2shortamt:
+                    etf500_shortamt = dict_sectype2shortamt['500ETF']
 
 
-
-
-            stock_amt_patched = stock_amt + stock_amt_patch
-            etf500_amt_patched = etf500_amt + etf500_amt_patch
-            ce_amt_patched = ce_amt + ce_amt_patch
-
-            # 2.整理capital
-            # 2.1 rawdata
-            # 2.2 patchdata
-
-
-            list_dicts_capital = self.db_trddata['manually_downloaded_rawdata_capital'].find(
+            # 2.2 求cash
+            list_dicts_bs = []
+            dict_capital = self.db_trddata['manually_rawdata_capital'].find_one(
                 {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
             )
 
-            list_dicts_capital_fmtted = []
             list_fields_af = ['可用', '可用金额', '资金可用金', '可用余额']
-            list_fields_secmv = ['证券市值', '参考市值', '市值', '总市值', '股票市值', ]
             list_fields_ttasset = ['总资产', '资产', '总 资 产', '账户总资产']
             list_fields_ttliability = ['总负债', '负债', '合约负债总额']
             list_fields_na = ['净资产']
-            flt_available_fund = None
-            flt_secmv = None
-            flt_ttasset = None
-            if accttype == 'c':
-                flt_ttliability = 0
-            else:
-                flt_ttliability = None
-            if accttype == 'c':
-                flt_net_asset = flt_ttasset
-            else:
-                flt_net_asset = None
 
-            for dict_capital in list_dicts_capital:
+            flt_na = None
+            flt_ttasset = None
+            flt_ttliability = None
+            # 分两种情况： 1. cash acct; 2. margin acct
+
+            flt_cash = None
+            if accttype == 'c':
                 for field_af in list_fields_af:
                     if field_af in dict_capital:
-                        flt_available_fund = float(dict_capital[field_af])
-                for field_secmv in list_fields_secmv:
-                    if field_secmv in dict_capital:
-                        flt_secmv = float(dict_capital[field_secmv])
+                        flt_cash = float(dict_capital[field_af])
+            elif accttype == 'm':
                 for field_ttasset in list_fields_ttasset:
                     if field_ttasset in dict_capital:
                         flt_ttasset = float(dict_capital[field_ttasset])
-                for field_ttliability in list_fields_ttliability:
-                    if field_ttliability in dict_capital:
-                        flt_ttliability = float(dict_capital[field_ttliability])
-                for field_na in list_fields_na:
-                    if field_na in dict_capital:
-                        flt_net_asset = float(dict_capital[field_na])
-                    else:
-                        flt_net_asset = flt_ttasset - flt_ttliability
+                flt_cash = flt_ttasset - stock_longamt - etf500_longamt - ce_longamt
+            else:
+                raise ValueError('Unknown accttype')
 
-                dict_capital_fmtted = {
-                    'PrdCode': prdcode,
-                    'AcctIDByMXZ': acctidbymxz,
-                    'DataDate': self.str_today,
-                    'AvailableFund': flt_available_fund,
-                    'SecurityMarketValue': flt_secmv,
-                    'TotalAsset': flt_ttasset,
-                    'TotalLiability': flt_ttliability,
-                    'NetAsset': flt_net_asset,
-                }
-            # 1.2 读取patchdata对rawdata进行修正
+            # 2.3 cash equivalent: ce_longamt
+            flt_ce = ce_longamt
+
+            # 2.4 etf
+            flt_etf_long_amt = etf500_longamt
+
+            # 2.4 CompositeLongAmt
+            flt_composite_long_amt = stock_longamt
+
+            # 2.5 Asset
+            flt_asset = flt_cash + flt_ce + flt_etf_long_amt + flt_composite_long_amt
+
+            # 2.6 etf_shortamt
+            flt_etf_short_amt = etf500_shortamt
+
+            # 2.7 stock_shortamt
+            flt_composite_short_amt = stock_shortamt
+
+            # 2.8 liability
+            flt_liability = flt_etf_short_amt + flt_composite_short_amt
+
+            # 2.9 net_asset
+            flt_approximate_na = flt_asset - flt_liability
+
+            dict_bs = {
+                'DataDate': self.str_today,
+                'PrdCode': prdcode,
+                'AcctIDByMXZ': acctidbymxz,
+                'AcctType': accttype,
+                'Cash': flt_cash,
+                'CashEquivalent': flt_ce,
+                'ETFLongAmt': flt_etf_long_amt,
+                'CompositeLongAmt': flt_composite_long_amt,
+                'Asset': flt_asset,
+                'ETFShortAmt': flt_etf_short_amt,
+                'CompositeShortAmt': flt_composite_short_amt,
+                'Liability': flt_liability,
+                'ApproximateNetAsset': flt_approximate_na,
+            }
+
+            # 2.2 读取patchdata对rawdata进行修正: 余额覆盖模式
             if patchmark:
                 list_dicts_patchdata_capital = list(self.db_trddata['manually_patchdata_capital'].find(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
@@ -1034,12 +1029,13 @@ class DBTradingData:
                         'CashEquivalent': cash_equivalent,
                         'LongAmt': longamt
                     })
+            dict_capital_patchdata = self.db_trddata['manually_patchdata_capital'].find_one(
+                {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+            )
+            flt_cash = None
+            if 'Cash' in dict_capital_patchdata:
+                flt_cash = dict_capital_patchdata['Cash']
 
-
-            # 2. 证券账户计算
-            # 2.1 交易客户端下载数据计算
-            # 2.2 patch data数据处理
-            # 3. 插入数据库
             self.db_trddata['capital_data_formatted_by_internal_style'].delete_many(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
             )
