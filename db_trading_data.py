@@ -77,8 +77,9 @@ class DBTradingData:
         self.db_trddata = self.client_mongo['trddata']
         self.dirpath_data_from_trdclient = 'data/trdrec_from_trdclient'
         self.fpath_datapatch_relative = 'data/data_patch.xlsx'
-        self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
-                                     '918', '919', '920', '922', '925', '928', '930']
+        # self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
+        #                              '918', '919', '920', '922', '925', '928', '930']
+        self.list_active_prdcodes = ['917']
 
     @staticmethod
     def seccode2bsitem(str_code):
@@ -258,6 +259,17 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
+            elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
+                fpath = fpath.replace('<YYYYMMDD>', self.str_today)
+                with open(fpath, 'rb') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].decode('gbk').split()
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.decode('gbk').split()
+                        if len(list_values) == len(list_keys):
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            list_ret.append(dict_rec_holding)
+
         else:
             raise ValueError('Wrong str_c_h_t_mark input!')
         return list_ret
@@ -289,18 +301,18 @@ class DBTradingData:
                             col_manually_downloaded_rawdata = col_manually_downloaded_rawdata_holding
                         else:
                             raise ValueError('Value input not exist in capital and holding.')
-                        fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
-                        list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch, data_source_type,accttype)
-                        for _ in list_dicts_rec:
-                            _['DataDate'] = self.str_today
-                            _['AcctIDByMXZ'] = acctidbymxz
 
                         col_manually_downloaded_rawdata.delete_many({'DataDate': self.str_today,
                                                                      'AcctIDByMXZ': acctidbymxz})
+
+                        fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
+                        list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch,
+                                                                          data_source_type, accttype)
+                        for _ in list_dicts_rec:
+                            _['DataDate'] = self.str_today
+                            _['AcctIDByMXZ'] = acctidbymxz
                         if list_dicts_rec:
                             col_manually_downloaded_rawdata.insert_many(list_dicts_rec)
-                        else:
-                            pass
 
 
     # def update_trddata_f(self):
@@ -1040,9 +1052,9 @@ class DBTradingData:
         print('Update patch data finished.')
 
     def run(self):
-        # self.update_rawdata()
-        self.update_manually_patchdata()
-        self.update_capital_and_holding_formatted_by_internal_style()
+        self.update_rawdata()
+        # self.update_manually_patchdata()
+        # self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()
