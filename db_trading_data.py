@@ -77,9 +77,8 @@ class DBTradingData:
         self.db_trddata = self.client_mongo['trddata']
         self.dirpath_data_from_trdclient = 'data/trdrec_from_trdclient'
         self.fpath_datapatch_relative = 'data/data_patch.xlsx'
-        # self.list_active_prdcodes = ['905', '906', '907', '908', '913', '914', '917',
-        #                              '918', '919', '920', '922', '925', '928', '930']
-        self.list_active_prdcodes = ['917']
+        self.list_active_prdcodes = ['905', '906', '908', '913', '914', '917',
+                                     '918', '919', '920', '922', '925', '929', '930']
 
     @staticmethod
     def seccode2bsitem(str_code):
@@ -232,6 +231,9 @@ class DBTradingData:
                 list_keys = ws.row_values(8)
                 for i in range(9, ws.nrows):
                     list_values = ws.row_values(i)
+                    str_values = ','.join(list_values)
+                    if '合计' in str_values:
+                        continue
                     dict_rec_holding = dict(zip(list_keys, list_values))
                     list_ret.append(dict_rec_holding)
 
@@ -261,6 +263,7 @@ class DBTradingData:
 
             elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
                 fpath = fpath.replace('<YYYYMMDD>', self.str_today)
+                print(fpath)
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].decode('gbk').split()
@@ -280,8 +283,8 @@ class DBTradingData:
         2. 定义DataFilePath = ['fpath_capital_data'(source), 'fpath_holding_data'(source), 'fpath_trdrec_data(source)',]
         3. acctinfo数据库中DataFilePath存在文件路径即触发文件数据的上传。
         """
-        col_manually_downloaded_rawdata_capital = self.db_trddata['manually_rawdata_capital']
-        col_manually_downloaded_rawdata_holding = self.db_trddata['manually_rawdata_holding']
+        col_manually_rawdata_capital = self.db_trddata['manually_rawdata_capital']
+        col_manually_rawdata_holding = self.db_trddata['manually_rawdata_holding']
         for _ in self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}):
             prdcode = _['PrdCode']
             datafilepath = _['DataFilePath']
@@ -295,24 +298,23 @@ class DBTradingData:
                     for ch in ['capital', 'holding']:
                         if ch == 'capital':
                             fpath_relative = list_fpath_data[0]
-                            col_manually_downloaded_rawdata = col_manually_downloaded_rawdata_capital
+                            col_manually_rawdata = col_manually_rawdata_capital
                         elif ch == 'holding':
                             fpath_relative = list_fpath_data[1]
-                            col_manually_downloaded_rawdata = col_manually_downloaded_rawdata_holding
+                            col_manually_rawdata = col_manually_rawdata_holding
                         else:
                             raise ValueError('Value input not exist in capital and holding.')
 
-                        col_manually_downloaded_rawdata.delete_many({'DataDate': self.str_today,
-                                                                     'AcctIDByMXZ': acctidbymxz})
-
+                        col_manually_rawdata.delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                         fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
                         list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch,
                                                                           data_source_type, accttype)
                         for _ in list_dicts_rec:
                             _['DataDate'] = self.str_today
                             _['AcctIDByMXZ'] = acctidbymxz
+                            _['AcctType'] = accttype
                         if list_dicts_rec:
-                            col_manually_downloaded_rawdata.insert_many(list_dicts_rec)
+                            col_manually_rawdata.insert_many(list_dicts_rec)
 
 
     # def update_trddata_f(self):
@@ -576,7 +578,7 @@ class DBTradingData:
         ).T.reset_index().rename(columns={'index': 'WindCode', 'SEC_NAME': 'Symbol', 'CLOSE': 'Close'})
         list_dicts_mktpatch = [
             {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 100},
-            {'WindCode': '510500.SH', 'Symbol': '中证500ETF', 'Close': 100}
+            {'WindCode': '511990.SH', 'Symbol': '华宝添益', 'Close': 100}
         ]
         df_mktdata_from_wind = df_mktdata_from_wind.append(list_dicts_mktpatch)
         return df_mktdata_from_wind
@@ -720,6 +722,8 @@ class DBTradingData:
                 return 'CS'
             elif secid in ['510500']:
                 return '500ETF'
+            elif secid in ['SHKCED']:
+                return 'IrrelevantItem'
             else:
                 raise ValueError(f'Cannot infer the security type of {str_code}.')
 
@@ -733,6 +737,8 @@ class DBTradingData:
                 return 'CE'
             elif secid in ['159001', '159005', '159003']:
                 return 'CE'
+            elif secid[:2] in ['08']:
+                return 'IrrelevantItem'
             else:
                 raise ValueError(f'Cannot get security type from code input: {str_code}')
 
@@ -778,8 +784,9 @@ class DBTradingData:
             prdcode = dict_acctinfo['PrdCode']
             acctidbymxz = dict_acctinfo['AcctIDByMXZ']
             accttype = dict_acctinfo['AcctType']
+            if accttype in ['f']:
+                continue
             patchmark = dict_acctinfo['PatchMark']
-
             # 1.整理holding
             # 1.1 rawdata
             list_dicts_holding = list(self.db_trddata['manually_rawdata_holding'].find(
@@ -788,6 +795,7 @@ class DBTradingData:
             list_fields_secid = ['证券代码']
             list_fields_symbol = ['证券名称']
             list_fields_shareholder_acctid = ['股东帐户', '股东账号']
+            list_fields_exchange = ['交易市场']
             list_fields_positionqty = ['股票余额', '拥股数量', '证券余额']
             list_dicts_holding_fmtted = []
             for dict_holding in list_dicts_holding:
@@ -807,6 +815,12 @@ class DBTradingData:
                             secidsrc = 'SSE'
                         if shareholder_acctid[0].isdigit():
                             secidsrc = 'SZSE'
+
+                for field_exchange in list_fields_exchange:
+                    if field_exchange in dict_holding:
+                        exchange = dict_holding[field_exchange]
+                        dict_exchange2secidsrc = {'深A': 'SZSE', '沪A': 'SSE', '上海Ａ': 'SSE', '深圳Ａ': 'SZSE'}
+                        secidsrc = dict_exchange2secidsrc[exchange]
 
                 for field_symbol in list_fields_symbol:
                     if field_symbol in dict_holding:
@@ -867,8 +881,10 @@ class DBTradingData:
                         'Note': note
                     }
                     list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata_fmtted)
-            list_dicts_holding_fmtted_patched = list_dicts_holding + list_dicts_holding_patchdata_fmtted
-            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched)
+            list_dicts_holding_fmtted_patched = list_dicts_holding_fmtted + list_dicts_holding_patchdata_fmtted
+            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched,
+                                                     columns=['DataDate', 'AcctIDByMXZ', 'SecurityID', 'Symbol',
+                                                              'SecurityIDSource', 'LongQty', 'ShortQty', 'Note'])
             df_holding_fmtted_patched['WindCode_suffix'] = (df_holding_fmtted_patched['SecurityIDSource']
                                                             .map({'SZSE': '.SZ', 'SSE': '.SH'}))
             df_holding_fmtted_patched['WindCode'] = (df_holding_fmtted_patched['SecurityID']
@@ -878,13 +894,14 @@ class DBTradingData:
             df_holding_fmtted_patched['Close'] = df_holding_fmtted_patched['WindCode'].map(dict_wcode2close)
             df_holding_fmtted_patched['LongAmt'] = (df_holding_fmtted_patched['LongQty']
                                                     * df_holding_fmtted_patched['Close'])
-            df_holding_fmtted_patched['ShortAmt'] = (df_holding_fmtted_patched['ShortAmt']
+            df_holding_fmtted_patched['ShortAmt'] = (df_holding_fmtted_patched['ShortQty']
                                                      * df_holding_fmtted_patched['Close'])
             df_holding_fmtted_patched['NetAmt'] = (df_holding_fmtted_patched['LongAmt']
                                                    - df_holding_fmtted_patched['ShortAmt'])
             list_dicts_holding_fmtted_patched = df_holding_fmtted_patched.to_dict('records')
             self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
-            self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
+            if list_dicts_holding_fmtted_patched:
+                self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
 
             # 2.整理b/s: 出于稳健性考量，股票市值由持仓数据计算得出: holding data + raw data + patch data
             # 将现金代替可用，重点计算
@@ -923,7 +940,8 @@ class DBTradingData:
                 {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
             )
             list_fields_af = ['可用', '可用金额', '资金可用金', '可用余额']
-            list_fields_ttasset = ['总资产', '资产', '总 资 产', '账户总资产']
+            # todo 检验: 华泰核新 - 两融 - 担保资产为总资产
+            list_fields_ttasset = ['总资产', '资产', '总 资 产', '账户总资产', '担保资产']
             flt_ttasset = None
             # 分两种情况： 1. cash acct; 2. margin acct
             flt_cash = None
@@ -1053,8 +1071,8 @@ class DBTradingData:
 
     def run(self):
         self.update_rawdata()
-        # self.update_manually_patchdata()
-        # self.update_capital_and_holding_formatted_by_internal_style()
+        self.update_manually_patchdata()
+        self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
         # update_trddata_m()

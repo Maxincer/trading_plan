@@ -74,6 +74,7 @@
       <w>sectorid</w>
       <w>sectype</w>
       <w>secvol</w>
+      <w>shkced</w>
       <w>shortamt</w>
       <w>shortqty</w>
       <w>skiprows</w>
