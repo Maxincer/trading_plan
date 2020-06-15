@@ -906,23 +906,14 @@ class DBTradingData:
                 if '500ETF' in dict_sectype2shortamt:
                     etf500_shortamt = dict_sectype2shortamt['500ETF']
 
-
             # 2.2 求cash
-            list_dicts_bs = []
             dict_capital = self.db_trddata['manually_rawdata_capital'].find_one(
                 {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
             )
-
             list_fields_af = ['可用', '可用金额', '资金可用金', '可用余额']
             list_fields_ttasset = ['总资产', '资产', '总 资 产', '账户总资产']
-            list_fields_ttliability = ['总负债', '负债', '合约负债总额']
-            list_fields_na = ['净资产']
-
-            flt_na = None
             flt_ttasset = None
-            flt_ttliability = None
             # 分两种情况： 1. cash acct; 2. margin acct
-
             flt_cash = None
             if accttype == 'c':
                 for field_af in list_fields_af:
@@ -932,6 +923,12 @@ class DBTradingData:
                 for field_ttasset in list_fields_ttasset:
                     if field_ttasset in dict_capital:
                         flt_ttasset = float(dict_capital[field_ttasset])
+                if patchmark:
+                    dict_patchdata_capital = (self.db_trddata['manually_patchdata_capital'].find_one(
+                        {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                    ))
+                    if 'TotalAsset' in dict_patchdata_capital:
+                        flt_ttasset = dict_patchdata_capital['TotalAsset']
                 flt_cash = flt_ttasset - stock_longamt - etf500_longamt - ce_longamt
             else:
                 raise ValueError('Unknown accttype')
@@ -946,7 +943,7 @@ class DBTradingData:
             flt_composite_long_amt = stock_longamt
 
             # 2.5 Asset
-            flt_asset = flt_cash + flt_ce + flt_etf_long_amt + flt_composite_long_amt
+            flt_ttasset = flt_cash + flt_ce + flt_etf_long_amt + flt_composite_long_amt
 
             # 2.6 etf_shortamt
             flt_etf_short_amt = etf500_shortamt
@@ -958,8 +955,31 @@ class DBTradingData:
             flt_liability = flt_etf_short_amt + flt_composite_short_amt
 
             # 2.9 net_asset
-            flt_approximate_na = flt_asset - flt_liability
+            flt_approximate_na = flt_ttasset - flt_liability
 
+            # 2.10 读取patchdata对rawdata进行修正: 余额覆盖模式
+            if patchmark:
+                dict_patchdata_capital = (self.db_trddata['manually_patchdata_capital'].find_one(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                ))
+                if 'Cash' in dict_patchdata_capital:
+                    flt_cash = float(dict_patchdata_capital['Cash'])
+                if 'CashEquivalent' in dict_patchdata_capital:
+                    flt_ce = float(dict_patchdata_capital['CashEquivalent'])
+                if 'ETFLongAmt' in dict_patchdata_capital:
+                    flt_etf_long_amt = float(dict_patchdata_capital['ETFLongAmt'])
+                if 'CompositeLongAmt' in dict_patchdata_capital:
+                    flt_composite_long_amt = float(dict_patchdata_capital['CompositeLongAmt'])
+                if 'TotalAsset' in dict_patchdata_capital:
+                    flt_ttasset = float(dict_patchdata_capital['TotalAsset'])
+                if 'ETFShortAmt' in dict_patchdata_capital:
+                    flt_etf_short_amt = float(dict_patchdata_capital['ETFShortAmt'])
+                if 'CompositeShortAmt' in dict_patchdata_capital:
+                    flt_composite_short_amt = float(dict_patchdata_capital['CompositeShortAmt'])
+                if 'Liability' in dict_patchdata_capital:
+                    flt_liability = float(dict_patchdata_capital['Liability'])
+                if 'ApproximateNetAmt' in dict_patchdata_capital:
+                    flt_approximate_na = float(dict_patchdata_capital['ApproximateNetAmt'])
             dict_bs = {
                 'DataDate': self.str_today,
                 'PrdCode': prdcode,
@@ -969,84 +989,15 @@ class DBTradingData:
                 'CashEquivalent': flt_ce,
                 'ETFLongAmt': flt_etf_long_amt,
                 'CompositeLongAmt': flt_composite_long_amt,
-                'Asset': flt_asset,
+                'TotalAsset': flt_ttasset,
                 'ETFShortAmt': flt_etf_short_amt,
                 'CompositeShortAmt': flt_composite_short_amt,
                 'Liability': flt_liability,
                 'ApproximateNetAsset': flt_approximate_na,
             }
-
-            # 2.2 读取patchdata对rawdata进行修正: 余额覆盖模式
-            if patchmark:
-                list_dicts_patchdata_capital = list(self.db_trddata['manually_patchdata_capital'].find(
-                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-                ))
-                df_patchdata_holding = pd.DataFrame(self.db_trddata['manually_patchdata_holding'].find(
-                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-                ))
-                df_patchdata_holding_sum_by_acctidbymxz = df_patchdata_holding.groupby(
-                    by=['AcctIDByMXZ', 'SecurityType']).sum()
-                dict_capital_field2dict_acctidbymxz_and_sectype2data = df_patchdata_holding_sum_by_acctidbymxz.to_dict()
-
-                for dict_patchdata_capital in list_dicts_patchdata_capital:
-                    acctidbymxz = dict_patchdata_capital['AcctIDByMXZ']
-                    if dict_patchdata_capital['Cash'] is None:
-                        raise ValueError(f'{acctidbymxz} has no Cash data!')
-                    else:
-                        cash = dict_patchdata_capital['Cash']
-                    if dict_patchdata_capital['CashEquivalent'] is None:
-                        acctidbymxz_and_sectype = (acctidbymxz, 'CE')  # cash equivalent
-                        cash_equivalent = \
-                            dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][acctidbymxz_and_sectype]
-                    else:
-                        cash_equivalent = dict_patchdata_capital['CashEquivalent']
-                    if dict_patchdata_capital['LongAmt'] is None:
-                        acctidbymxz_and_sectype = (acctidbymxz, 'CS')  # common stock
-                        longamt = dict_capital_field2dict_acctidbymxz_and_sectype2data['LongAmt'][
-                            acctidbymxz_and_sectype]
-                    else:
-                        longamt = dict_patchdata_capital['LongAmt']
-                    if dict_patchdata_capital['TotalLiability'] is None:
-                        acctidbymxz_and_sectype = (acctidbymxz, 'ETF')
-                        ttliability = dict_capital_field2dict_acctidbymxz_and_sectype2data['ShortAmt'][
-                            acctidbymxz_and_sectype]
-                    else:
-                        ttliability = dict_patchdata_capital['TotalLiability']
-                    if dict_patchdata_capital['TotalAsset'] is None:
-                        ttasset = cash + cash_equivalent + longamt
-                    else:
-                        ttasset = dict_patchdata_capital['TotalAsset']
-                    if dict_patchdata_capital['NetAsset'] is None:
-                        netasset = ttasset - ttliability
-                    else:
-                        netasset = dict_patchdata_capital['NetAsset']
-
-                    dict_patchdata_capital.update({
-                        'NetAsset': netasset,
-                        'TotalAsset': ttasset,
-                        'TotalLiability': ttliability,
-                        'Cash': cash,
-                        'CashEquivalent': cash_equivalent,
-                        'LongAmt': longamt
-                    })
-            dict_capital_patchdata = self.db_trddata['manually_patchdata_capital'].find_one(
-                {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-            )
-            flt_cash = None
-            if 'Cash' in dict_capital_patchdata:
-                flt_cash = dict_capital_patchdata['Cash']
-
-            self.db_trddata['capital_data_formatted_by_internal_style'].delete_many(
-                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-            )
-            if list_dicts_capital_fmtted:
-                self.db_trddata['capital_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
-
-            self.db_trddata['holding_data_formatted_by_internal_style'].delete_many(
-                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-            )
-            # if list_dicts_holding_fmtted:
-            #     self.db_trddata['holding_data_formatted_by_internal_style'].insert_many(list_dicts_capital_fmtted)
+            self.db_trddata['b/s_by_acct'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+            if dict_bs:
+                self.db_trddata['b/s_by_acct'].insert_one(dict_bs)
 
     def get_list_dicts_holding_from_data_patch(self, acctid):
         """
@@ -1090,7 +1041,7 @@ class DBTradingData:
 
     def run(self):
         # self.update_rawdata()
-        # self.update_manually_patchdata()
+        self.update_manually_patchdata()
         self.update_capital_and_holding_formatted_by_internal_style()
         # update_trddata_f()
         # update_trddata_c()
