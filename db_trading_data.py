@@ -61,17 +61,15 @@ from openpyxl import load_workbook
 import pandas as pd
 import pymongo
 from WindPy import *
-
 from xlrd import open_workbook
 
-# from trader import Trader
+from trader import Trader
 
 
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
         w.start()
-        self.str_today = '20200603'
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.col_acctinfo = self.client_mongo['basicinfo']['acctinfo']
         self.db_trddata = self.client_mongo['trddata']
@@ -79,35 +77,6 @@ class DBTradingData:
         self.fpath_datapatch_relative = 'data/data_patch.xlsx'
         self.list_active_prdcodes = ['905', '906', '908', '913', '914', '917',
                                      '918', '919', '920', '922', '925', '929', '930']
-
-    @staticmethod
-    def seccode2bsitem(str_code):
-        """
-        Transfer the code into b/s item of the account
-        :param str_code: 6-digit code
-        :return:
-        str
-            {
-            'st': stock, 股票
-            'ce': 现金及一般等价物,
-            'unknown': others
-            }
-        :note:
-        无B股股东账户， 在清洗持仓数据时，为考虑B股代码问题。
-
-        """
-        str_code = str_code.zfill(6)
-        if str_code[:3] in ['600', '601', '603', '688', '689']:  # 未考虑B股
-            return 'st'
-        elif str_code[:2] in ['00', '30']:
-            return 'st'
-        elif str_code[:3] in ['204', '511', '159', '519', '521', '660']:
-            return 'ce'
-        elif str_code[:2] in ['13']:
-            return 'ce'
-        else:
-            print(f'New security type found, please check {str_code} type and update the function "seccode2bsitem".')
-            return 'unknown'
 
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
@@ -235,6 +204,14 @@ class DBTradingData:
                     if '合计' in str_values:
                         continue
                     dict_rec_holding = dict(zip(list_keys, list_values))
+                    # 以下为不规则补充, todo 需改进
+                    if accttype == 'm':
+                        if '证券代码' in dict_rec_holding:
+                            secid = dict_rec_holding['证券代码']
+                            if secid[1] in ['6', '2', '5']:
+                                dict_rec_holding['交易市场'] = '沪A'
+                            else:
+                                dict_rec_holding['交易市场'] = '深A'
                     list_ret.append(dict_rec_holding)
 
             elif data_source_type in ['hait_ehtc'] and accttype == 'c':
@@ -263,7 +240,6 @@ class DBTradingData:
 
             elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
                 fpath = fpath.replace('<YYYYMMDD>', self.str_today)
-                print(fpath)
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].decode('gbk').split()
@@ -316,199 +292,64 @@ class DBTradingData:
                         if list_dicts_rec:
                             col_manually_rawdata.insert_many(list_dicts_rec)
 
-
-    # def update_trddata_f(self):
-    #     """
-    #     f"{prdcode}_{accttype}_{acctid}_{content}}
-    #     # todo 可用装饰器优化
-    #     """
-    #     cursor_find = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': 1})
-    #     for _ in cursor_find:
-    #         prdcode = _['prdcode']
-    #         accttype = _['accttype']
-    #         acctid = _['acctid']
-    #         colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
-    #         trader = Trader(acctid)
-    #         dict_res_capital = trader.query_account()
-    #         if dict_res_capital['success'] == 1:
-    #             dict_capital_to_be_update = dict_res_capital['list'][0]
-    #             dict_capital_to_be_update['date'] = self.str_today
-    #             col_f_capital = self.db_trddata[colname_capital]
-    #             col_f_capital.delete_many({'date': self.str_today})
-    #             col_f_capital.insert_one(dict_capital_to_be_update)
-    #             print(f'Query capital data of {acctid}({accttype}) succeed.')
-    #         else:
-    #             print(f'Query capital data of {acctid}({accttype}) failed.')
-    #
-    #         colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
-    #         dict_res_holding = trader.query_holding()
-    #         if dict_res_holding['success'] == 1:
-    #             list_dicts_holding_to_be_update = dict_res_holding['list']
-    #             for dict_holding_to_be_update in list_dicts_holding_to_be_update:
-    #                 dict_holding_to_be_update['date'] = self.str_today
-    #                 dict_holding_to_be_update['acctid'] = acctid
-    #             col_f_holding = self.db_trddata[colname_holding]
-    #             col_f_holding.delete_many({'date': self.str_today})
-    #             if list_dicts_holding_to_be_update:
-    #                 col_f_holding.insert_many(list_dicts_holding_to_be_update)
-    #             else:
-    #                 pass
-    #             print(f'Query holding data of {acctid}({accttype}) succeed.')
-    #
-    #         else:
-    #             print(f'Query holding data of {acctid}({accttype}) succeed.')
-    #
-    #         colname_trading = f'{prdcode}_{accttype}_{acctid}_trading'
-    #         dict_res_trading = trader.query_trading()
-    #         if dict_res_trading['success'] == 1:
-    #             list_dicts_trading_to_be_update = dict_res_trading['list']
-    #             for dict_trading_to_be_update in list_dicts_trading_to_be_update:
-    #                 dict_trading_to_be_update['date'] = self.str_today
-    #                 dict_trading_to_be_update['acctid'] = acctid
-    #             col_f_trading = self.db_trddata[colname_trading]
-    #             col_f_trading.delete_many({'date': self.str_today})
-    #             if list_dicts_trading_to_be_update:
-    #                 col_f_trading.insert_many(list_dicts_trading_to_be_update)
-    #             else:
-    #                 pass
-    #             print(f'Query trading data of {acctid}({accttype}) succeed.')
-    #
-    #         else:
-    #             print(f'Query trading data of {acctid}({accttype}) succeed.')
-
-
-    def get_list_dicts_holding(self, acctid):
-        col_manually_downloaded_data_holding = self.db_trddata['manually_downloaded_rawdata_holding']
-        list_dicts_holding = []
-        for _ in col_manually_downloaded_data_holding.find({'date': self.str_today, 'acctid': acctid}):
-            list_values = [str(_value) for _value in list(_.values())]
-            str_joined_values = ''.join(list_values)
-            if '没有' in str_joined_values:
-                continue
-            dict_holding = {'date': _['date'], 'acctid': _['acctid']}
-            list_fields_seccode = ['证券代码', '代码']
-            for field_seccode in list_fields_seccode:
-                if field_seccode in _:
-                    dict_holding['sec_code'] = str(_[field_seccode]).zfill(6)
-            list_fields_secname = ['证券名称']
-            for field_secname in list_fields_secname:
-                if field_secname in _:
-                    dict_holding['sec_name'] = _[field_secname]
-            list_fields_secmv = ['最新市值', '市值']
-            for field_secmv in list_fields_secmv:
-                if field_secmv in _:
-                    dict_holding['sec_mv'] = float(_[field_secmv])
-            list_fields_secvol = ['证券数量', '证券余额', '持股数量']
-            for field_secvol in list_fields_secvol:
-                if field_secvol in _:
-                    dict_holding['sec_vol'] = int(_[field_secvol])
-            list_dicts_holding.append(dict_holding)
-        return list_dicts_holding
-
-    def update_trddata_c(self):
+    def update_trddata_f(self):
         """
-        更新cash account的两类col： 1. capital， 2. holding
-        :return:
+        f"{prdcode}_{accttype}_{acctid}_{content}}
+        # todo 可用装饰器优化
         """
-        colfind_c_acctid = self.col_acctinfo.find({'date': self.str_today, 'accttype': 'c', 'rptmark': 1})
-        for _ in colfind_c_acctid:
-            if '/' in _['fpath_holding']:
-                acctid = _['acctid']
-                prdcode = _['prdcode']
-                accttype = _['accttype']
-                colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
-                dict_capital = self.get_dict_capital_for_cash_acct(acctid)
-                col_c_capital = self.db_trddata[colname_capital]
-                col_c_capital.delete_many({'date': self.str_today, 'acctid': acctid})
-                col_c_capital.insert_one(dict_capital)
-                colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
-                list_dicts_holding = self.get_list_dicts_holding(acctid)
-                col_c_holding = self.db_trddata[colname_holding]
-                col_c_holding.delete_many({'date': self.str_today, 'acctid': acctid})
-                if list_dicts_holding:
-                    col_c_holding.insert_many(list_dicts_holding)
+        cursor_find = self.col_acctinfo.find({'date': self.str_today, 'accttype': 'f', 'rptmark': 1})
+        for _ in cursor_find:
+            prdcode = _['prdcode']
+            accttype = _['accttype']
+            acctid = _['acctid']
+            colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
+            trader = Trader(acctid)
+            dict_res_capital = trader.query_account()
+            if dict_res_capital['success'] == 1:
+                dict_capital_to_be_update = dict_res_capital['list'][0]
+                dict_capital_to_be_update['date'] = self.str_today
+                col_f_capital = self.db_trddata[colname_capital]
+                col_f_capital.delete_many({'date': self.str_today})
+                col_f_capital.insert_one(dict_capital_to_be_update)
+                print(f'Query capital data of {acctid}({accttype}) succeed.')
+            else:
+                print(f'Query capital data of {acctid}({accttype}) failed.')
+
+            colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
+            dict_res_holding = trader.query_holding()
+            if dict_res_holding['success'] == 1:
+                list_dicts_holding_to_be_update = dict_res_holding['list']
+                for dict_holding_to_be_update in list_dicts_holding_to_be_update:
+                    dict_holding_to_be_update['date'] = self.str_today
+                    dict_holding_to_be_update['acctid'] = acctid
+                col_f_holding = self.db_trddata[colname_holding]
+                col_f_holding.delete_many({'date': self.str_today})
+                if list_dicts_holding_to_be_update:
+                    col_f_holding.insert_many(list_dicts_holding_to_be_update)
                 else:
                     pass
-        print('Cash account data update finished.')
+                print(f'Query holding data of {acctid}({accttype}) succeed.')
 
-    def get_dict_capital_for_margin_acct(self, acctid):
-        """
-        todo 需要询问是如何下载数据的
-        todo 需设计自定义表单 解决margin account的问题
-        核心：总资产, 总负债, 净资产
-        华泰（hexin委托）可在查询收市负债中找到信息
+            else:
+                print(f'Query holding data of {acctid}({accttype}) succeed.')
 
-        """
-        col_manually_downloaded_data_capital = self.db_trddata['manually_downloaded_rawdata_capital']
-        dict_capital_find = col_manually_downloaded_data_capital.find_one({'date': self.str_today, 'acctid': acctid})
-        dict_capital = {'date': dict_capital_find['date'], 'acctid': dict_capital_find['acctid']}
-        list_fields_af = ['可用', '可用金额', '资金可用金']
-        for field_af in list_fields_af:
-            if field_af in dict_capital_find:
-                dict_capital['available_fund'] = float(dict_capital_find[field_af])
-        list_fields_mv = ['证券市值', '参考市值', '市值', '总市值']
-        for field_mv in list_fields_mv:
-            if field_mv in dict_capital_find:
-                dict_capital['sec_mv'] = float(dict_capital_find[field_mv])
-        list_fields_ttasset = ['总资产', '资产']
-        for field_ttasset in list_fields_ttasset:
-            if field_ttasset in dict_capital_find:
-                dict_capital['ttasset'] = float(dict_capital_find[field_ttasset])
-        list_fields_ttliability = ['总负债', '负债']
-        for field_ttliability in list_fields_ttliability:
-            if field_ttliability in dict_capital_find:
-                dict_capital['ttliability'] = float(dict_capital_find[field_ttliability])
-        list_fields_na = ['净资产']
-        for field_na in list_fields_na:
-            if field_na in dict_capital_find:
-                dict_capital['na'] = float(dict_capital_find[field_na])
-        return dict_capital
-
-    def update_trddata_m(self):
-        """
-        更新margin account的两类col：1. capital 2. holding
-        :return:
-        """
-        colfind_m_acctid = self.col_myacctsinfo.find({'date': self.str_today, 'accttype': 'm', 'rptmark': 1})
-        for _ in colfind_m_acctid:
-            if '/' in _['fpath_holding']:
-                acctid = _['acctid']
-                prdcode = _['prdcode']
-                accttype = _['accttype']
-                colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
-                dict_capital = self.get_dict_capital_for_margin_acct(acctid)
-                dict_m_capital = {
-                    'date': self.str_today,
-                    'acctid': acctid,
-                    'ttasset': dict_capital['ttasset'],
-                    'af': dict_capital['available_fund'],
-                    'secmv': dict_capital['sec_mv']
-                }
-                if dict_capital['ttliability']:
-                    dict_m_capital['ttliability'] = dict_capital['ttliability']
-                else:
-                    dict_m_capital['ttliability'] = 'unknown'
-                if dict_capital['na']:
-                    dict_m_capital['nav'] = dict_capital['na']
-                else:
-                    dict_m_capital['nav'] = 'unknown'
-                col_m_capital = self.db_trddata[colname_capital]
-                col_m_capital.delete_many({'date': self.str_today, 'acctid': acctid})
-                col_m_capital.insert_one(dict_m_capital)
-                colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
-                list_dicts_holding = self.get_list_dicts_holding(acctid)
-                col_m_holding = self.db_trddata[colname_holding]
-                col_m_holding.delete_many({'date': self.str_today, 'acctid': acctid})
-                if list_dicts_holding:
-                    col_m_holding.insert_many(list_dicts_holding)
+            colname_trading = f'{prdcode}_{accttype}_{acctid}_trading'
+            dict_res_trading = trader.query_trading()
+            if dict_res_trading['success'] == 1:
+                list_dicts_trading_to_be_update = dict_res_trading['list']
+                for dict_trading_to_be_update in list_dicts_trading_to_be_update:
+                    dict_trading_to_be_update['date'] = self.str_today
+                    dict_trading_to_be_update['acctid'] = acctid
+                col_f_trading = self.db_trddata[colname_trading]
+                col_f_trading.delete_many({'date': self.str_today})
+                if list_dicts_trading_to_be_update:
+                    col_f_trading.insert_many(list_dicts_trading_to_be_update)
                 else:
                     pass
-        print('Margin account data update finished.')
+                print(f'Query trading data of {acctid}({accttype}) succeed.')
 
-    def get_dict_capital_from_data_patch(self, acctid):
-        col_patch = self.db_trddata['manually_patch_rawdata_capital']
-        dict_patch = col_patch.find_one({'date': self.str_today, 'acctid': acctid})
-        return dict_patch
+            else:
+                print(f'Query trading data of {acctid}({accttype}) succeed.')
 
     def update_manually_patchdata(self):
         """
@@ -722,10 +563,8 @@ class DBTradingData:
                 return 'CS'
             elif secid in ['510500']:
                 return '500ETF'
-            elif secid in ['SHKCED']:
-                return 'IrrelevantItem'
             else:
-                raise ValueError(f'Cannot infer the security type of {str_code}.')
+                return 'IrrelevantItem'
 
         elif exchange in ['SZ', 'SZSE'] and len(secid) == 6:
             if secid[:3] in ['000', '001', '002', '003', '004', '300', '301', '302', '303', '304', '305', '306', '307',
@@ -737,11 +576,8 @@ class DBTradingData:
                 return 'CE'
             elif secid in ['159001', '159005', '159003']:
                 return 'CE'
-            elif secid[:2] in ['08']:
-                return 'IrrelevantItem'
             else:
-                raise ValueError(f'Cannot get security type from code input: {str_code}')
-
+                return 'IrrelevantItem'
         else:
             raise ValueError(f'{str_code} has unknown exchange or digit number is not 6.')
 
@@ -776,6 +612,7 @@ class DBTradingData:
                 7. LongAmt
                 8. ShortAmt
         """
+
         df_mktdata_from_wind = self.get_close_from_wind()
         dict_wcode2close = df_mktdata_from_wind.set_index('WindCode').to_dict()['Close']
 
@@ -794,9 +631,9 @@ class DBTradingData:
             ))
             list_fields_secid = ['证券代码']
             list_fields_symbol = ['证券名称']
-            list_fields_shareholder_acctid = ['股东帐户', '股东账号']
-            list_fields_exchange = ['交易市场']
-            list_fields_positionqty = ['股票余额', '拥股数量', '证券余额']
+            list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
+            list_fields_exchange = ['交易市场', '交易板块', '板块']
+            list_fields_positionqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股']
             list_dicts_holding_fmtted = []
             for dict_holding in list_dicts_holding:
                 secid = None
@@ -819,7 +656,9 @@ class DBTradingData:
                 for field_exchange in list_fields_exchange:
                     if field_exchange in dict_holding:
                         exchange = dict_holding[field_exchange]
-                        dict_exchange2secidsrc = {'深A': 'SZSE', '沪A': 'SSE', '上海Ａ': 'SSE', '深圳Ａ': 'SZSE'}
+                        dict_exchange2secidsrc = {'深A': 'SZSE', '沪A': 'SSE',
+                                                  '上海Ａ': 'SSE', '深圳Ａ': 'SZSE',
+                                                  '00': 'SZSE', '10': 'SSE'}
                         secidsrc = dict_exchange2secidsrc[exchange]
 
                 for field_symbol in list_fields_symbol:
@@ -860,7 +699,7 @@ class DBTradingData:
                     secidsrc = dict_holding_patchdata['SecurityIDSource']
                     symbol = None
                     if 'Symbol' in dict_holding_patchdata:
-                        symbol = dict_holding_patchdata
+                        symbol = dict_holding_patchdata['Symbol']
                     longqty = 0
                     if 'LongQty' in dict_holding_patchdata:
                         longqty = dict_holding_patchdata['LongQty']
@@ -904,7 +743,7 @@ class DBTradingData:
                 self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
 
             # 2.整理b/s: 出于稳健性考量，股票市值由持仓数据计算得出: holding data + raw data + patch data
-            # 将现金代替可用，重点计算
+            # 将现金代替可用，重点计算s
             # Cash, CashEquivalent, CompositeLongAmt, Asset, ShortAmt, Liability, ApproximateNetAsset
             # patch data采用余额覆盖模式。（holding data采用增量添加模式）
 
@@ -928,8 +767,8 @@ class DBTradingData:
 
             stock_shortamt = 0
             etf500_shortamt = 0
-            if 'shortAmt' in dict_amt2dict_sectype2amt:
-                dict_sectype2shortamt = dict_amt2dict_sectype2amt['shortAmt']
+            if 'ShortAmt' in dict_amt2dict_sectype2amt:
+                dict_sectype2shortamt = dict_amt2dict_sectype2amt['ShortAmt']
                 if 'CS' in dict_sectype2shortamt:
                     stock_shortamt = dict_sectype2shortamt['CS']
                 if '500ETF' in dict_sectype2shortamt:
@@ -957,8 +796,9 @@ class DBTradingData:
                     dict_patchdata_capital = (self.db_trddata['manually_patchdata_capital'].find_one(
                         {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
                     ))
-                    if 'TotalAsset' in dict_patchdata_capital:
-                        flt_ttasset = dict_patchdata_capital['TotalAsset']
+                    if dict_patchdata_capital:
+                        if 'TotalAsset' in dict_patchdata_capital:
+                            flt_ttasset = dict_patchdata_capital['TotalAsset']
                 flt_cash = flt_ttasset - stock_longamt - etf500_longamt - ce_longamt
             else:
                 raise ValueError('Unknown accttype')
@@ -992,24 +832,25 @@ class DBTradingData:
                 dict_patchdata_capital = (self.db_trddata['manually_patchdata_capital'].find_one(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
                 ))
-                if 'Cash' in dict_patchdata_capital:
-                    flt_cash = float(dict_patchdata_capital['Cash'])
-                if 'CashEquivalent' in dict_patchdata_capital:
-                    flt_ce = float(dict_patchdata_capital['CashEquivalent'])
-                if 'ETFLongAmt' in dict_patchdata_capital:
-                    flt_etf_long_amt = float(dict_patchdata_capital['ETFLongAmt'])
-                if 'CompositeLongAmt' in dict_patchdata_capital:
-                    flt_composite_long_amt = float(dict_patchdata_capital['CompositeLongAmt'])
-                if 'TotalAsset' in dict_patchdata_capital:
-                    flt_ttasset = float(dict_patchdata_capital['TotalAsset'])
-                if 'ETFShortAmt' in dict_patchdata_capital:
-                    flt_etf_short_amt = float(dict_patchdata_capital['ETFShortAmt'])
-                if 'CompositeShortAmt' in dict_patchdata_capital:
-                    flt_composite_short_amt = float(dict_patchdata_capital['CompositeShortAmt'])
-                if 'Liability' in dict_patchdata_capital:
-                    flt_liability = float(dict_patchdata_capital['Liability'])
-                if 'ApproximateNetAmt' in dict_patchdata_capital:
-                    flt_approximate_na = float(dict_patchdata_capital['ApproximateNetAmt'])
+                if dict_patchdata_capital:
+                    if 'Cash' in dict_patchdata_capital:
+                        flt_cash = float(dict_patchdata_capital['Cash'])
+                    if 'CashEquivalent' in dict_patchdata_capital:
+                        flt_ce = float(dict_patchdata_capital['CashEquivalent'])
+                    if 'ETFLongAmt' in dict_patchdata_capital:
+                        flt_etf_long_amt = float(dict_patchdata_capital['ETFLongAmt'])
+                    if 'CompositeLongAmt' in dict_patchdata_capital:
+                        flt_composite_long_amt = float(dict_patchdata_capital['CompositeLongAmt'])
+                    if 'TotalAsset' in dict_patchdata_capital:
+                        flt_ttasset = float(dict_patchdata_capital['TotalAsset'])
+                    if 'ETFShortAmt' in dict_patchdata_capital:
+                        flt_etf_short_amt = float(dict_patchdata_capital['ETFShortAmt'])
+                    if 'CompositeShortAmt' in dict_patchdata_capital:
+                        flt_composite_short_amt = float(dict_patchdata_capital['CompositeShortAmt'])
+                    if 'Liability' in dict_patchdata_capital:
+                        flt_liability = float(dict_patchdata_capital['Liability'])
+                    if 'ApproximateNetAmt' in dict_patchdata_capital:
+                        flt_approximate_na = float(dict_patchdata_capital['ApproximateNetAmt'])
             dict_bs = {
                 'DataDate': self.str_today,
                 'PrdCode': prdcode,
@@ -1028,55 +869,13 @@ class DBTradingData:
             self.db_trddata['b/s_by_acct'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
             if dict_bs:
                 self.db_trddata['b/s_by_acct'].insert_one(dict_bs)
-
-    def get_list_dicts_holding_from_data_patch(self, acctid):
-        """
-        需要load行情数据， 计算市值
-        :param acctid:
-        :return:
-        """
-        col_patch = self.db_trddata['manually_patch_rawdata_holding']
-        list_dicts_holding_from_data_patch = list(col_patch.find({'date': self.str_today, 'acctid': acctid}))
-        return list_dicts_holding_from_data_patch
-
-    def update_col_data_patch(self):
-        """
-        1. 上传A_data_patch.xlsx数据至mongo;
-        2. 从mongo中读取数据，整理至产品的正式数据表中（所以此步一定要置后执行）
-        col_data_patch: 数据补丁。主要补充下载数据中没有体现的重要数据。当日截面数据日更算法。
-        3. A_data_patch.xlsx中的数据，sec_code带有交易所编码，方便在行情数据库中查询行情。更好的做法是添加股东代码字段，区分市场。可优化。
-        """
-        colfind_patch_in_basicinfo = self.col_acctinfo.find({'date': self.str_today, 'rptmark': 1, 'patch_mark': 1})
-        for _ in colfind_patch_in_basicinfo:
-            acctid = _['acctid']
-            prdcode = _['prdcode']
-            accttype = _['accttype']
-            colname_capital = f'{prdcode}_{accttype}_{acctid}_capital'
-            col_capital = self.db_trddata[colname_capital]
-            dict_capital_patch = self.get_dict_capital_from_data_patch(acctid)
-            if dict_capital_patch:
-                del dict_capital_patch['_id']
-                col_capital.update_one({'date': self.str_today, 'acctid': acctid}, {'$set': dict_capital_patch})
-            else:
-                pass
-            colname_holding = f'{prdcode}_{accttype}_{acctid}_holding'
-            col_holding = self.db_trddata[colname_holding]
-            list_dicts_holding = self.get_list_dicts_holding_from_data_patch(acctid)
-            col_holding.delete_many({'date': self.str_today, 'acctid': acctid, 'patch_mark': 1})
-            if list_dicts_holding:
-                for dict_holding in list_dicts_holding:
-                    dict_holding['patch_mark'] = 1
-                col_holding.insert_many(list_dicts_holding)
-        print('Update patch data finished.')
+        print('update capital and holding formatted by internal style finished.')
 
     def run(self):
         self.update_rawdata()
         self.update_manually_patchdata()
         self.update_capital_and_holding_formatted_by_internal_style()
-        # update_trddata_f()
-        # update_trddata_c()
-        # update_trddata_m()
-        # update_col_data_patch()
+        # self.update_trddata_f()
 
 
 if __name__ == '__main__':
