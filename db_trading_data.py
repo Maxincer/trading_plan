@@ -69,6 +69,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200615'
         w.start()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.col_acctinfo = self.client_mongo['basicinfo']['acctinfo']
@@ -204,14 +205,14 @@ class DBTradingData:
                     if '合计' in str_values:
                         continue
                     dict_rec_holding = dict(zip(list_keys, list_values))
-                    # 以下为不规则补充, todo 需改进
+                    # 以下为不规则补充, todo
                     if accttype == 'm':
                         if '证券代码' in dict_rec_holding:
                             secid = dict_rec_holding['证券代码']
-                            if secid[1] in ['6', '2', '5']:
-                                dict_rec_holding['交易市场'] = '沪A'
-                            else:
+                            if secid[0] in ['0', '1', '3']:
                                 dict_rec_holding['交易市场'] = '深A'
+                            else:
+                                dict_rec_holding['交易市场'] = '沪A'
                     list_ret.append(dict_rec_holding)
 
             elif data_source_type in ['hait_ehtc'] and accttype == 'c':
@@ -291,6 +292,7 @@ class DBTradingData:
                             _['AcctType'] = accttype
                         if list_dicts_rec:
                             col_manually_rawdata.insert_many(list_dicts_rec)
+        print('Update raw data finished.')
 
     def update_trddata_f(self):
         """
