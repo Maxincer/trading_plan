@@ -2,6 +2,7 @@
   <dictionary name="maxinzhe">
     <words>
       <w>acctid</w>
+      <w>acctidbybroker</w>
       <w>acctidbymxz</w>
       <w>acctids</w>
       <w>acctinfo</w>
@@ -16,6 +17,7 @@
       <w>colfind</w>
       <w>colname</w>
       <w>colunms</w>
+      <w>datadate</w>
       <w>datafilepath</w>
       <w>datainline</w>
       <w>dataline</w>
@@ -56,10 +58,12 @@
       <w>patchdata</w>
       <w>patchmark</w>
       <w>pname</w>
+      <w>poscost</w>
       <w>positionqty</w>
       <w>prcs</w>
       <w>prdcode</w>
       <w>prdcodes</w>
+      <w>qtyamt</w>
       <w>rawdata</w>
       <w>readlines</w>
       <w>recdata</w>
@@ -70,6 +74,7 @@
       <w>secmb</w>
       <w>secmv</w>
       <w>secname</w>
+      <w>secsrc</w>
       <w>sectorconstituent</w>
       <w>sectorid</w>
       <w>sectype</w>
@@ -78,6 +83,8 @@
       <w>shortamt</w>
       <w>shortqty</w>
       <w>skiprows</w>
+      <w>startvalue</w>
+      <w>swapamt</w>
       <w>swhy</w>
       <w>szse</w>
       <w>trdclient</w>
@@ -86,6 +93,10 @@
       <w>ttasset</w>
       <w>ttliability</w>
       <w>tushare</w>
+      <w>underlyingqty</w>
+      <w>underlyingsec</w>
+      <w>underlyingsecid</w>
+      <w>underlyingsecsrc</w>
       <w>wcode</w>
       <w>wcodes</w>
       <w>windcode</w>
@@ -93,6 +104,7 @@
       <w>wset</w>
       <w>xlsx</w>
       <w>yyyymmdd</w>
+      <w>zhes</w>
       <w>zxjt</w>
     </words>
   </dictionary>
