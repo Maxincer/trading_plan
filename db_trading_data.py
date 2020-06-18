@@ -360,9 +360,12 @@ class DBTradingData:
         df_datapatch_holding = pd.read_excel(self.fpath_datapatch_relative, sheet_name='holding',
                                              dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
                                                     'LongQty': float, 'ShortQty': float, 'PosCost_vec': float,
-                                                    'SecurityType': str, 'UnderlyingSecurityID': str,
+                                                    'LiabilityType': str,
+                                                    'LiabilityQty': float, 'LiabilityAmt': float, 'InterestRate': float,
+                                                    'DatedDate': str, 'UnderlyingSecurityID': str,
                                                     'UnderlyingSecurityIDSource': str, 'UnderlyingSymbol': str,
-                                                    'UnderlyingQty': float, 'UnderlyingStartValue_vec': float, 'Note': str},
+                                                    'UnderlyingQty': float, 'UnderlyingStartValue_vec': float,
+                                                    'Note': str},
                                              converters={'SecurityIDSource': str.upper})
         df_datapatch_holding = df_datapatch_holding.where(df_datapatch_holding.notnull(), None)
         list_dicts_datapatch_holding = df_datapatch_holding.to_dict('records')
@@ -374,7 +377,10 @@ class DBTradingData:
             secidsrc = dict_datapatch_holding['SecurityIDSource']
             symbol = dict_datapatch_holding['Symbol']
             secid_secidsrc = secid + '.' + secidsrc
-            secid_windcode = secid + dict_exchange_wcode[secidsrc]
+            if secidsrc == 'ITN':
+                secid_windcode = None
+            else:
+                secid_windcode = secid + dict_exchange_wcode[secidsrc]
             longqty = dict_datapatch_holding['LongQty']
             shortqty = dict_datapatch_holding['ShortQty']
             sectype = self.get_mingshi_sectype_from_code(secid_secidsrc)
@@ -384,6 +390,7 @@ class DBTradingData:
             liability_type = dict_datapatch_holding['LiabilityType']
             interest_rate = dict_datapatch_holding['InterestRate']
             dateddate = dict_datapatch_holding['DatedDate']
+            liability = 0
             note = dict_datapatch_holding['Note']
 
             underlying_secid = None
@@ -394,16 +401,14 @@ class DBTradingData:
             underlying_close = None
             underlying_amt = None
             underlying_start_value_vec = None
-            underlying_long_amt = None
-            underlying_short_amt = None
             otc_contract_unit_mv = None
 
             if sectype in ['SWAP']:
                 underlying_secid = dict_datapatch_holding['UnderlyingSecurityID']
                 underlying_secidsrc = dict_datapatch_holding['UnderlyingSecurityIDSource']
                 underlying_sec_windcode = underlying_secid + dict_exchange_wcode[underlying_secidsrc]
-                underlying_symbol = underlying_sec_windcode['Symbol'][underlying_sec_windcode]
-                underlying_sectype = self.get_mingshi_sectype_from_code(underlying_secid)
+                underlying_symbol = dict_windcode2mktdata_from_wind['Symbol'][underlying_sec_windcode]
+                underlying_sectype = self.get_mingshi_sectype_from_code(underlying_sec_windcode)
                 underlying_close = dict_windcode2mktdata_from_wind['Close'][underlying_sec_windcode]
                 underlying_qty = dict_datapatch_holding['UnderlyingQty']
                 underlying_amt = underlying_close * underlying_qty
@@ -411,7 +416,19 @@ class DBTradingData:
                 otc_contract_unit_mv = underlying_amt - underlying_start_value_vec
                 close = otc_contract_unit_mv
             elif sectype in ['CE', 'CS', 'ETF']:
-                close = dict_windcode2mktdata_from_wind[secid_windcode]
+                close = dict_windcode2mktdata_from_wind['Close'][secid_windcode]
+                if sectype in ['CS', 'ETF']:
+                    int_accumulated_interested_days = w.tdayscount(dateddate, self.str_today, "Days=Alldays").Data[0][0]
+                    if liability_type == 'capital':
+                        interest_1day = liability_margin_amt * interest_rate / 365
+                        liability_accrual_interest = int_accumulated_interested_days * interest_1day
+                        liability = liability_margin_amt + liability_accrual_interest
+                    elif liability_type == 'security':  # todo 不标准的表述, 需改进; 出于开发成本考虑，此处简化融券应付利息算法
+                        liability_sec_amt = liability_sec_qty * close
+                        interest_1day = liability_sec_amt * interest_rate / 365
+                        liability = liability_sec_amt + int_accumulated_interested_days * interest_1day
+                    else:
+                        raise ValueError('Unknown liability type when compute liability')
             else:
                 raise ValueError('Unknown sectype when update manually data.')
 
@@ -419,14 +436,6 @@ class DBTradingData:
             shortamt = close * shortqty
             netamt = longamt - shortamt
 
-            if liability_type == 'margin debt':
-                interest_today = liability_margin_amt * interest_rate
-            elif liability_type == 'security debt':  # todo 不标准的表述, 需改进
-                liability_amt = liability_sec_qty * close
-                interest_today = liability_amt * interest_rate
-            else:
-                raise ValueError('Unknown liability type when compute liability')
-            liability_amt =
             dict_datapatch_holding_2b_inserted = {
                 'DataDate': self.str_today,
                 'AcctIDByMXZ': acctidbymxz,
@@ -436,10 +445,16 @@ class DBTradingData:
                 'SecurityType': sectype,
                 'LongQty': longqty,
                 'ShortQty': shortqty,
-                'LongAmt': underlying_long_amt,
-                'ShortAmt': underlying_short_amt,
+                'LongAmt': longamt,
+                'ShortAmt': shortamt,
                 'NetAmt': netamt,
                 'PosCost_vec': poscost_vec,
+                'LiabilityType': liability_type,
+                'LiabilityQty': liability_sec_qty,
+                'LiabilityAmt': liability_margin_amt,
+                'InterestRate': interest_rate,
+                'DatedDate': dateddate,
+                'Liability': liability,
                 'UnderlyingSecurityID': underlying_secid,
                 'UnderlyingSecurityIDSource': underlying_secidsrc,
                 'UnderlyingSymbol': underlying_symbol,
@@ -457,9 +472,11 @@ class DBTradingData:
 
         # 上传capital data
         df_datapatch_capital = pd.read_excel(self.fpath_datapatch_relative, sheet_name='capital',
-                                             dtype={'AcctIDByMXZ': str, 'NetAssetValue': float, 'TotalAsset': float,
-                                                    'TotalLiability': float, 'Cash': float,
-                                                    'SecurityMarketValue': float})
+                                             dtype={'AcctIDByMXZ': str, 'Cash': float, 'CashEquivalent': float,
+                                                    'ETFLongAmt': float, 'CompositeLongAmt': float, 'OTCAmt': float,
+                                                    'TotalAsset': float, 'ETFShortAmt': float,
+                                                    'CompositeSHortAmt': float, 'Liability': float,
+                                                    'ApproximateNetAsset': float})
         df_datapatch_capital['DataDate'] = self.str_today
         df_datapatch_capital = df_datapatch_capital.where(df_datapatch_capital.notnull(), None)
         list_dicts_patch_capital = df_datapatch_capital.to_dict('record')
@@ -633,7 +650,7 @@ class DBTradingData:
             elif secid[:3] in ['600', '601', '603', '688']:
                 return 'CS'
             elif secid in ['510500', '000905']:
-                return '500ETF'
+                return 'ETF'
             else:
                 return 'IrrelevantItem'
 
@@ -983,7 +1000,7 @@ class DBTradingData:
         print('update capital and holding formatted by internal style finished.')
 
     def run(self):
-        self.update_rawdata()
+        # self.update_rawdata()
         self.update_manually_patchdata()
         # self.update_capital_and_holding_formatted_by_internal_style()
         # self.update_trddata_f()
