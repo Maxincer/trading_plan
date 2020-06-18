@@ -762,14 +762,45 @@ class DBTradingData:
                     if field_positionqty in dict_holding:
                         longqty = float(dict_holding[field_positionqty])
 
+                windcode_suffix = {'SZSE': '.SZ', 'SSE': '.SH'}[secidsrc]
+                windcode = secid + windcode_suffix
+                sectype = self.get_mingshi_sectype_from_code(windcode)
+                if sectype == 'IrrelevantItem':
+                    continue
+                close = dict_wcode2close[windcode]
+                longamt = close * longqty
+                shortamt = close * shortqty
+                netamt = longamt - shortamt
+
                 dict_holding_fmtted = {
                     'DataDate': self.str_today,
                     'AcctIDByMXZ': acctidbymxz,
                     'SecurityID': secid,
+                    'SecurityType': sectype,
                     'Symbol': symbol,
                     'SecurityIDSource': secidsrc,
                     'LongQty': longqty,
                     'ShortQty': shortqty,
+                    'LongAmt': longamt,
+                    'ShortAmt': shortamt,
+                    'NetAmt': netamt,
+                    'PosCost_vec': None,
+                    'OTCContractUnitMarketValue': None,
+                    'LiabilityType': None,
+                    'Liability': 0,
+                    'LiabilityQty': None,
+                    'LiabilityAmt': None,
+                    'InterestRate': None,
+                    'DatedDate': None,
+                    'UnderlyingSecurityID': None,
+                    'UnderlyingSecurityIDSource': None,
+                    'UnderlyingSecurityType': None,
+                    'UnderlyingSymbol': None,
+                    'UnderlyingQty': None,
+                    'UnderlyingAmt': None,
+                    'UnderlyingClose': None,
+                    'UnderlyingStartValue_vec': None,
+                    'Note': None
                 }
                 list_dicts_holding_fmtted.append(dict_holding_fmtted)
 
@@ -788,49 +819,9 @@ class DBTradingData:
                 ))
                 # todo 需改进自定义标的持仓价格和持仓金额的情况（eg.场外非标, 下层基金）
                 for dict_holding_patchdata in list_dicts_holding_patchdata:
-                    secid = dict_holding_patchdata['SecurityID']
-                    secidsrc = dict_holding_patchdata['SecurityIDSource']
-                    symbol = None
-                    if 'Symbol' in dict_holding_patchdata:
-                        symbol = dict_holding_patchdata['Symbol']
-                    longqty = 0
-                    if 'LongQty' in dict_holding_patchdata:
-                        longqty = dict_holding_patchdata['LongQty']
-                    shortqty = 0
-                    if 'ShortQty' in dict_holding_patchdata:
-                        shortqty = dict_holding_patchdata['ShortQty']
-                    note = None
-                    if 'Note' in dict_holding_patchdata:
-                        note = str(dict_holding_patchdata['Note'])
-                    dict_holding_patchdata_fmtted = {
-                        'DataDate': self.str_today,
-                        'AcctIDByMXZ': acctidbymxz,
-                        'SecurityID': secid,
-                        'Symbol': symbol,
-                        'SecurityIDSource': secidsrc,
-                        'LongQty': longqty,
-                        'ShortQty': shortqty,
-                        'Note': note
-                    }
-                    list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata_fmtted)
+                    list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata)
             list_dicts_holding_fmtted_patched = list_dicts_holding_fmtted + list_dicts_holding_patchdata_fmtted
-            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched,
-                                                     columns=['DataDate', 'AcctIDByMXZ', 'SecurityID', 'Symbol',
-                                                              'SecurityIDSource', 'LongQty', 'ShortQty', 'Note'])
-            df_holding_fmtted_patched['WindCode_suffix'] = (df_holding_fmtted_patched['SecurityIDSource']
-                                                            .map({'SZSE': '.SZ', 'SSE': '.SH'}))
-            df_holding_fmtted_patched['WindCode'] = (df_holding_fmtted_patched['SecurityID']
-                                                     + df_holding_fmtted_patched['WindCode_suffix'])
-            df_holding_fmtted_patched['SecurityType'] = (df_holding_fmtted_patched['WindCode']
-                                                         .apply(self.get_mingshi_sectype_from_code))
-            df_holding_fmtted_patched['Close'] = df_holding_fmtted_patched['WindCode'].map(dict_wcode2close)
-            df_holding_fmtted_patched['LongAmt'] = (df_holding_fmtted_patched['LongQty']
-                                                    * df_holding_fmtted_patched['Close'])
-            df_holding_fmtted_patched['ShortAmt'] = (df_holding_fmtted_patched['ShortQty']
-                                                     * df_holding_fmtted_patched['Close'])
-            df_holding_fmtted_patched['NetAmt'] = (df_holding_fmtted_patched['LongAmt']
-                                                   - df_holding_fmtted_patched['ShortAmt'])
-            list_dicts_holding_fmtted_patched = df_holding_fmtted_patched.to_dict('records')
+
             self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
             if list_dicts_holding_fmtted_patched:
                 self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)
@@ -1000,9 +991,9 @@ class DBTradingData:
         print('update capital and holding formatted by internal style finished.')
 
     def run(self):
-        # self.update_rawdata()
+        self.update_rawdata()
         self.update_manually_patchdata()
-        # self.update_capital_and_holding_formatted_by_internal_style()
+        self.update_capital_and_holding_formatted_by_internal_style()
         # self.update_trddata_f()
 
 
