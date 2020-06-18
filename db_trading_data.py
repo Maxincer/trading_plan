@@ -374,41 +374,59 @@ class DBTradingData:
             secidsrc = dict_datapatch_holding['SecurityIDSource']
             symbol = dict_datapatch_holding['Symbol']
             secid_secidsrc = secid + '.' + secidsrc
-            sectype = self.get_mingshi_sectype_from_code(secid_secidsrc)
+            secid_windcode = secid + dict_exchange_wcode[secidsrc]
             longqty = dict_datapatch_holding['LongQty']
             shortqty = dict_datapatch_holding['ShortQty']
-            # todo 需要添加amt
+            sectype = self.get_mingshi_sectype_from_code(secid_secidsrc)
             poscost_vec = dict_datapatch_holding['PosCost_vec']
+            liability_sec_qty = dict_datapatch_holding['LiabilityQty']
+            liability_margin_amt = dict_datapatch_holding['LiabilityAmt']
+            liability_type = dict_datapatch_holding['LiabilityType']
+            interest_rate = dict_datapatch_holding['InterestRate']
+            dateddate = dict_datapatch_holding['DatedDate']
+            note = dict_datapatch_holding['Note']
+
             underlying_secid = None
             underlying_secidsrc = None
             underlying_symbol = None
+            underlying_sectype = None
             underlying_qty = None
+            underlying_close = None
+            underlying_amt = None
             underlying_start_value_vec = None
-            contract_mv = None
             underlying_long_amt = None
             underlying_short_amt = None
-            note = dict_datapatch_holding['Note']
+            otc_contract_unit_mv = None
 
             if sectype in ['SWAP']:
                 underlying_secid = dict_datapatch_holding['UnderlyingSecurityID']
                 underlying_secidsrc = dict_datapatch_holding['UnderlyingSecurityIDSource']
                 underlying_sec_windcode = underlying_secid + dict_exchange_wcode[underlying_secidsrc]
                 underlying_symbol = underlying_sec_windcode['Symbol'][underlying_sec_windcode]
-                close = underlying_sec_windcode['Close'][underlying_sec_windcode]
+                underlying_sectype = self.get_mingshi_sectype_from_code(underlying_secid)
+                underlying_close = dict_windcode2mktdata_from_wind['Close'][underlying_sec_windcode]
                 underlying_qty = dict_datapatch_holding['UnderlyingQty']
-                underlying_qtyamt = close * underlying_qty
-                underlying_long_amt = 0
-                underlying_short_amt = 0
-                if underlying_qtyamt > 0:
-                    underlying_long_amt = underlying_qtyamt
-                else:
-                    underlying_short_amt = underlying_qtyamt
-
+                underlying_amt = underlying_close * underlying_qty
                 underlying_start_value_vec = dict_datapatch_holding['UnderlyingStartValue_vec']
-                contract_mv = underlying_qtyamt - underlying_start_value_vec
+                otc_contract_unit_mv = underlying_amt - underlying_start_value_vec
+                close = otc_contract_unit_mv
+            elif sectype in ['CE', 'CS', 'ETF']:
+                close = dict_windcode2mktdata_from_wind[secid_windcode]
             else:
-                pass
+                raise ValueError('Unknown sectype when update manually data.')
 
+            longamt = close * longqty
+            shortamt = close * shortqty
+            netamt = longamt - shortamt
+
+            if liability_type == 'margin debt':
+                interest_today = liability_margin_amt * interest_rate
+            elif liability_type == 'security debt':  # todo 不标准的表述, 需改进
+                liability_amt = liability_sec_qty * close
+                interest_today = liability_amt * interest_rate
+            else:
+                raise ValueError('Unknown liability type when compute liability')
+            liability_amt =
             dict_datapatch_holding_2b_inserted = {
                 'DataDate': self.str_today,
                 'AcctIDByMXZ': acctidbymxz,
@@ -418,15 +436,19 @@ class DBTradingData:
                 'SecurityType': sectype,
                 'LongQty': longqty,
                 'ShortQty': shortqty,
+                'LongAmt': underlying_long_amt,
+                'ShortAmt': underlying_short_amt,
+                'NetAmt': netamt,
                 'PosCost_vec': poscost_vec,
                 'UnderlyingSecurityID': underlying_secid,
                 'UnderlyingSecurityIDSource': underlying_secidsrc,
                 'UnderlyingSymbol': underlying_symbol,
+                'UnderlyingSecurityType': underlying_sectype,
                 'UnderlyingQty': underlying_qty,
+                'UnderlyingClose': underlying_close,
+                'UnderlyingAmt': underlying_amt,
                 'UnderlyingStartValue_vec': underlying_start_value_vec,
-                'ContractMarketValue': contract_mv,
-                'LongAmt': underlying_long_amt,
-                'ShortAmt': underlying_short_amt,
+                'OTCContractUnitMarketValue': otc_contract_unit_mv,
                 'Note': note
             }
             list_dicts_datapatch_holding_to_be_inserted.append(dict_datapatch_holding_2b_inserted)
@@ -596,7 +618,7 @@ class DBTradingData:
         :return:
             1. CE, Cash Equivalent, 货基，质押式国债逆回购
             2. CS, Common Stock, 普通股
-            3. ETF, ETF
+            3. ETF, ETF, 注意：货币类ETF归类为CE，而不是ETF
             4. SWAP, swap
         """
 

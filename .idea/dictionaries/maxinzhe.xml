@@ -24,6 +24,7 @@
       <w>datalines</w>
       <w>datapatch</w>
       <w>datasourcetype</w>
+      <w>dateddate</w>
       <w>dbclient</w>
       <w>dirpath</w>
       <w>dupatch</w>
@@ -39,6 +40,8 @@
       <w>hexin</w>
       <w>huat</w>
       <w>indexfuture</w>
+      <w>liabilityamt</w>
+      <w>liabilityqty</w>
       <w>localholst</w>
       <w>longamt</w>
       <w>longqty</w>
