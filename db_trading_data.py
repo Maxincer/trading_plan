@@ -69,7 +69,6 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200615'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -832,36 +831,41 @@ class DBTradingData:
             # patch data采用余额覆盖模式。（holding data采用增量添加模式）
 
             # 2.1 holding data
-            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched)
-            df_holding_sectype_amt = (df_holding_fmtted_patched
-                                      .loc[:, ['SecurityType', 'LongAmt', 'ShortAmt', 'NetAmt', 'Liability',
-                                               'UnderlyingAmt']]
-                                      .copy())
-            df_holding_amt_sum_by_sectype = df_holding_sectype_amt.groupby(by='SecurityType').sum()
-            dict_amt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
             stock_longamt = 0
             etf_longamt = 0
             ce_longamt = 0
             swap_longamt = 0
-            if 'LongAmt' in dict_amt2dict_sectype2amt:
-                dict_sectype2longamt = dict_amt2dict_sectype2amt['LongAmt']
-                if 'CS' in dict_sectype2longamt:
-                    stock_longamt = dict_sectype2longamt['CS']
-                if 'ETF' in dict_sectype2longamt:
-                    etf_longamt = dict_sectype2longamt['ETF']
-                if 'CE' in dict_sectype2longamt:
-                    ce_longamt = dict_sectype2longamt['CE']
-                if 'SWAP' in dict_sectype2longamt:
-                    swap_longamt = dict_sectype2longamt['SWAP']
-
             stock_shortamt = 0
             etf_shortamt = 0
-            if 'ShortAmt' in dict_amt2dict_sectype2amt:
-                dict_sectype2shortamt = dict_amt2dict_sectype2amt['ShortAmt']
-                if 'CS' in dict_sectype2shortamt:
-                    stock_shortamt = dict_sectype2shortamt['CS']
-                if 'ETF' in dict_sectype2shortamt:
-                    etf_shortamt = dict_sectype2shortamt['ETF']
+            df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched)
+            if df_holding_fmtted_patched.empty:
+                df_holding_fmtted_patched = pd.DataFrame(
+                    columns=['DataDate', 'AcctIDByMXZ', 'SecurityID', 'SecurityType', 'Symbol', 'SecurityIDSource',
+                             'Symbol', 'SecurityIDSource',
+                             'LongQty', 'ShortQty', 'LongAmt', 'ShortAmt', 'NetAmt', 'PosCost_vec',
+                             'OTCContractUnitMarketValue', 'LiabilityType', 'Liability', 'LiabilityQty', 'LiabilityAmt',
+                             'InterestRate', 'DatedDate', 'UnderlyingSecurityID', 'UnderlyingSecurityIDSource',
+                             'UnderlyingSecurityType', 'UnderlyingSymbol', 'UnderlyingQty', 'UnderlyingAmt',
+                             'UnderlyingClose', 'UnderlyingStartValue_vec', 'Note'])
+            else:
+                df_holding_amt_sum_by_sectype = df_holding_fmtted_patched.groupby(by='SecurityType').sum()
+                dict_amt2dict_sectype2amt = df_holding_amt_sum_by_sectype.to_dict()
+                if 'LongAmt' in dict_amt2dict_sectype2amt:
+                    dict_sectype2longamt = dict_amt2dict_sectype2amt['LongAmt']
+                    if 'CS' in dict_sectype2longamt:
+                        stock_longamt = dict_sectype2longamt['CS']
+                    if 'ETF' in dict_sectype2longamt:
+                        etf_longamt = dict_sectype2longamt['ETF']
+                    if 'CE' in dict_sectype2longamt:
+                        ce_longamt = dict_sectype2longamt['CE']
+                    if 'SWAP' in dict_sectype2longamt:
+                        swap_longamt = dict_sectype2longamt['SWAP']
+                if 'ShortAmt' in dict_amt2dict_sectype2amt:
+                    dict_sectype2shortamt = dict_amt2dict_sectype2amt['ShortAmt']
+                    if 'CS' in dict_sectype2shortamt:
+                        stock_shortamt = dict_sectype2shortamt['CS']
+                    if 'ETF' in dict_sectype2shortamt:
+                        etf_shortamt = dict_sectype2shortamt['ETF']
 
             # 2.2 求cash
             dict_capital = self.db_trddata['manually_rawdata_capital'].find_one(
@@ -934,7 +938,7 @@ class DBTradingData:
             flt_composite_short_amt = stock_shortamt
 
             # 2.8 liability
-            flt_liability = df_holding_sectype_amt['Liability'].sum()
+            flt_liability = float(df_holding_fmtted_patched['Liability'].sum())
 
             # 2.9 net_asset
             flt_approximate_na = flt_ttasset - flt_liability
@@ -981,6 +985,7 @@ class DBTradingData:
                 'CashEquivalent': flt_ce,
                 'ETFLongAmt': flt_etf_long_amt,
                 'CompositeLongAmt': flt_composite_long_amt,
+                'SwapLongAmt': flt_swap_amt,
                 'TotalAsset': flt_ttasset,
                 'ETFShortAmt': flt_etf_short_amt,
                 'CompositeShortAmt': flt_composite_short_amt,
@@ -988,8 +993,9 @@ class DBTradingData:
                 'ApproximateNetAsset': flt_approximate_na,
             }
             self.db_trddata['b/s_by_acct'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+            list_dict_bs = [dict_bs]
             if dict_bs:
-                self.db_trddata['b/s_by_acct'].insert_one(dict_bs)
+                self.db_trddata['b/s_by_acct'].insert_many(list_dict_bs)
         print('update capital and holding formatted by internal style finished.')
 
     def run(self):
@@ -997,6 +1003,8 @@ class DBTradingData:
         self.update_manually_patchdata()
         self.update_capital_and_holding_formatted_by_internal_style()
         # self.update_trddata_f()
+
+
 
 
 if __name__ == '__main__':
