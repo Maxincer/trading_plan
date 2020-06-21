@@ -709,6 +709,9 @@ class DBTradingData:
             对每个账户遍历
                 1. 求单账户风险暴露： [c,m,f,o]
                 2. 求单账户持仓状况和资产负债表
+                3. 求单账户现金管理
+        todo：
+            1. 新股的市值的处理（目前: 找出并删除），需要观察经纪商是如何处理的
         """
 
         dict_wcode2close = self.df_mktdata_from_wind.set_index('WindCode').to_dict()['Close']
@@ -718,10 +721,6 @@ class DBTradingData:
             prdcode = dict_acctinfo['PrdCode']
             acctidbymxz = dict_acctinfo['AcctIDByMXZ']
             accttype = dict_acctinfo['AcctType']
-            exposure_long_amt = None
-            exposure_short_amt = None
-            exposure_net_amt = None
-            flt_approximate_na = None
             if accttype in ['c', 'm', 'o']:
                 patchmark = dict_acctinfo['PatchMark']
                 # 1.整理holding
@@ -841,7 +840,7 @@ class DBTradingData:
                 if underlying_amt >= 0:
                     underlying_exposure_long = underlying_amt
                 else:
-                    underlying_exposure_short = underlying_amt
+                    underlying_exposure_short = -underlying_amt
 
 
                 # 2.整理b/s: 出于稳健性考量，股票市值由持仓数据计算得出: holding data + raw data + patch data
@@ -1131,6 +1130,8 @@ class DBTradingData:
         df_exposure_analysis_by_acct = pd.DataFrame(list_dicts_exposure_analysis_by_acct)
         df_exposure_analysis_by_prdcode = df_exposure_analysis_by_acct.groupby(by='PrdCode').sum().reset_index()
         df_exposure_analysis_by_prdcode['DataDate'] = self.str_today
+        df_exposure_analysis_by_prdcode['NetExposure(%)'] = (df_exposure_analysis_by_prdcode['NetExposure']
+                                                             / df_exposure_analysis_by_prdcode['ApproximateNetAsset'])
         list_dicts_exposure_analysis_by_prdcode = df_exposure_analysis_by_prdcode.to_dict('records')
         self.db_trddata['exposure_analysis_by_prdcode'].delete_many({'DataDate': self.str_today})
         if list_dicts_exposure_analysis_by_prdcode:
