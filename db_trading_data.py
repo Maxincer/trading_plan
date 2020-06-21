@@ -1139,8 +1139,8 @@ class DBTradingData:
 
     def run(self):
         # self.update_trddata_f()
-        # self.update_rawdata()
-        # self.update_manually_patchdata()
+        self.update_rawdata()
+        self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
 
