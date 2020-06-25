@@ -1,4 +1,5 @@
-# Ëã·¨£º perfect shape
+# ç®—æ³•ï¼š perfect shape
+# coding:utf-8
 from math import floor
 
 net_asset = 13650
@@ -16,6 +17,6 @@ def get_perfect_shape(net_asset, strategy, alpha_position_percent):
         short_amt_provided_by_future = future_contract_lots * future_contract_value
         stock_amt_final = short_amt_provided_by_future
 
-
-
-
+str_1 = 'ss,ss,ss'
+a = str_1.replace(',','2')
+print(a)

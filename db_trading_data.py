@@ -54,7 +54,6 @@ Note:
 
 """
 
-from datetime import datetime
 import os
 
 from openpyxl import load_workbook
@@ -69,7 +68,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200619'
+        self.str_today = '20200624'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -77,8 +76,6 @@ class DBTradingData:
         self.db_trddata = self.client_mongo['trddata']
         self.dirpath_data_from_trdclient = 'data/trdrec_from_trdclient'
         self.fpath_datapatch_relative = 'data/data_patch.xlsx'
-        self.list_active_prdcodes = ['905', '906', '908', '913', '914', '917',
-                                     '918', '919', '920', '921', '922', '929', '930']
         self.dict_future2multiplier = {'IC': 200, 'IH': 300, 'IF': 300}
 
     @staticmethod
@@ -118,7 +115,7 @@ class DBTradingData:
         list_ret = []
         if str_c_h_t_mark == 'capital':
             dict_rec_capital = {}
-            if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx'] and accttype == 'c':
+            if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'tf_hx', 'db_hx', 'wk_hx'] and accttype == 'c':
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()[0:6]
                     for dataline in list_datalines:
@@ -127,13 +124,25 @@ class DBTradingData:
                             list_recdata = data.strip().decode('gbk').split('：')
                             dict_rec_capital[list_recdata[0].strip()] = list_recdata[1].strip()
 
-            elif data_source_type in ['huat_hx', 'hait_hx'] and accttype == 'm':
+            elif data_source_type in ['yh_hx'] and accttype in ['c']:
+                with open(fpath, 'rb') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[5].decode('gbk').split()
+                    list_values = list_datalines[6].decode('gbk').split()
+                    dict_rec_capital.update(dict(zip(list_keys, list_values)))
+
+            elif data_source_type in ['huat_hx', 'hait_hx', 'wk_hx'] and accttype == 'm':
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()[5:14]
                     for dataline in list_datalines:
-                        list_data = dataline.strip().split(b'\t')
+                        if dataline.strip():
+                            list_data = dataline.strip().split(b'\t')
+                        else:
+                            continue
                         for data in list_data:
                             list_recdata = data.strip().decode('gbk').split(':')
+                            if len(list_recdata) != 2:
+                                list_recdata = data.strip().decode('gbk').split('：')
                             dict_rec_capital[list_recdata[0].strip()] = \
                                 (lambda x: x if x.strip() in ['人民币'] else list_recdata[1].strip())(list_recdata[1])
 
@@ -148,7 +157,8 @@ class DBTradingData:
                 df_read = pd.read_excel(fpath, skiprows=1, nrows=1)
                 dict_rec_capital = df_read.to_dict('records')[0]
 
-            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx'] and accttype == 'c':
+            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
+                                      'zhaos_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     dataline = list_datalines[0][8:]
@@ -157,11 +167,7 @@ class DBTradingData:
                         list_recdata = recdata.split(':')
                         dict_rec_capital.update({list_recdata[0]: list_recdata[1]})
 
-            # todo 检查tdx margin (1105)
-            elif data_source_type in ['zx_tdx'] and accttype == 'm':
-                pass
-
-            elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee',] and accttype in ['c', 'm']:
+            elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
                 fpath = fpath.replace('<YYYYMMDD>', self.str_today)
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
@@ -176,30 +182,44 @@ class DBTradingData:
                     list_values = list_datalines[1].decode('gbk').split(',')
                     dict_rec_capital.update(dict(zip(list_keys, list_values)))
 
+            elif data_source_type in ['patch']:
+                pass
+
             else:
                 raise ValueError('Field data_source_type not exist in basic info!')
             list_ret.append(dict_rec_capital)
 
         elif str_c_h_t_mark == 'holding':
-            if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx'] and accttype == 'c':
+            if (data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx',
+                                     'wk_hx', 'db_hx', 'tf_hx', 'yh_hx']) and (accttype in ['c', 'm']):
                 with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()[8:]
-                    list_keys = [x.decode('gbk') for x in list_datalines[0].strip().split(b'\t')]
+                    list_datalines = f.readlines()
+                    start_index_holding = None
+                    for index, dataline in enumerate(list_datalines):
+                        if '证券代码' in dataline.decode('gbk'):
+                            start_index_holding = index
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split(b'\t')]
                     i_list_keys_length = len(list_keys)
-                    for dataline in list_datalines[1:]:
+
+                    for dataline in list_datalines[start_index_holding + 1:]:
                         list_data = dataline.strip().split(b'\t')
                         if len(list_data) == i_list_keys_length:
                             list_values = [x.decode('gbk') for x in list_data]
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-            elif data_source_type in ['huat_hx', 'hait_hx'] and accttype == 'm':
+            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()[16:]
-                    list_keys = [x.decode('gbk') for x in list_datalines[0].strip().split(b'\t')]
+                    list_datalines = f.readlines()
+                    start_index_holding = None
+                    for index, dataline in enumerate(list_datalines):
+                        if '证券代码' in dataline.decode('gbk'):
+                            start_index_holding = index
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split(b'\t')]
                     i_list_keys_length = len(list_keys)
-                    for dataline in list_datalines[1:]:
-                        list_data = dataline.strip().split(b'\t')
+
+                    for dataline in list_datalines[start_index_holding + 1:]:
+                        list_data = dataline.strip().split()
                         if len(list_data) == i_list_keys_length:
                             list_values = [x.decode('gbk') for x in list_data]
                             dict_rec_holding = dict(zip(list_keys, list_values))
@@ -237,18 +257,6 @@ class DBTradingData:
                 list_dicts_rec_holding = df_holding.to_dict('records')
                 list_ret = list_dicts_rec_holding
 
-            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx'] and accttype == 'c':
-                with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()[3:]
-                    list_keys = [x.decode('gbk') for x in list_datalines[0].strip().split()]
-                    i_list_keys_length = len(list_keys)
-                    for dataline in list_datalines[1:]:
-                        list_data = dataline.strip().split()
-                        if len(list_data) == i_list_keys_length:
-                            list_values = [x.decode('gbk') for x in list_data]
-                            dict_rec_holding = dict(zip(list_keys, list_values))
-                            list_ret.append(dict_rec_holding)
-
             elif data_source_type in ['zxjt_alphabee', 'swhy_alphabee'] and accttype in ['c', 'm']:
                 fpath = fpath.replace('<YYYYMMDD>', self.str_today)
                 with open(fpath, 'rb') as f:
@@ -283,35 +291,33 @@ class DBTradingData:
         col_manually_rawdata_capital = self.db_trddata['manually_rawdata_capital']
         col_manually_rawdata_holding = self.db_trddata['manually_rawdata_holding']
         for _ in self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}):
-            prdcode = _['PrdCode']
             datafilepath = _['DataFilePath']
-            if prdcode in self.list_active_prdcodes:
-                if datafilepath:
-                    list_fpath_data = _['DataFilePath'][1:-1].split(',')
-                    acctidbymxz = _['AcctIDByMXZ']
-                    data_source_type = _['DataSourceType']
-                    accttype = _['AcctType']
+            if datafilepath:
+                list_fpath_data = _['DataFilePath'][1:-1].split(',')
+                acctidbymxz = _['AcctIDByMXZ']
+                data_source_type = _['DataSourceType']
+                accttype = _['AcctType']
 
-                    for ch in ['capital', 'holding']:
-                        if ch == 'capital':
-                            fpath_relative = list_fpath_data[0]
-                            col_manually_rawdata = col_manually_rawdata_capital
-                        elif ch == 'holding':
-                            fpath_relative = list_fpath_data[1]
-                            col_manually_rawdata = col_manually_rawdata_holding
-                        else:
-                            raise ValueError('Value input not exist in capital and holding.')
+                for ch in ['capital', 'holding']:
+                    if ch == 'capital':
+                        fpath_relative = list_fpath_data[0]
+                        col_manually_rawdata = col_manually_rawdata_capital
+                    elif ch == 'holding':
+                        fpath_relative = list_fpath_data[1]
+                        col_manually_rawdata = col_manually_rawdata_holding
+                    else:
+                        raise ValueError('Value input not exist in capital and holding.')
 
-                        col_manually_rawdata.delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
-                        fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
-                        list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch,
-                                                                          data_source_type, accttype)
-                        for _ in list_dicts_rec:
-                            _['DataDate'] = self.str_today
-                            _['AcctIDByMXZ'] = acctidbymxz
-                            _['AcctType'] = accttype
-                        if list_dicts_rec:
-                            col_manually_rawdata.insert_many(list_dicts_rec)
+                    col_manually_rawdata.delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+                    fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
+                    list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch,
+                                                                      data_source_type, accttype)
+                    for _ in list_dicts_rec:
+                        _['DataDate'] = self.str_today
+                        _['AcctIDByMXZ'] = acctidbymxz
+                        _['AcctType'] = accttype
+                    if list_dicts_rec:
+                        col_manually_rawdata.insert_many(list_dicts_rec)
         print('Update raw data finished.')
 
     def update_trddata_f(self):
@@ -756,9 +762,12 @@ class DBTradingData:
                         if field_exchange in dict_holding:
                             exchange = dict_holding[field_exchange]
                             dict_exchange2secidsrc = {'深A': 'SZSE', '沪A': 'SSE',
+                                                      '深Ａ': 'SZSE', '沪Ａ': 'SSE',
                                                       '上海Ａ': 'SSE', '深圳Ａ': 'SZSE',
                                                       '00': 'SZSE', '10': 'SSE',
-                                                      '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE'}
+                                                      '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
+                                                      '上海A股': 'SSE', '深圳A股': 'SZSE',
+                                                      }
                             secidsrc = dict_exchange2secidsrc[exchange]
 
                     for field_symbol in list_fields_symbol:
@@ -841,7 +850,6 @@ class DBTradingData:
                     underlying_exposure_long = underlying_amt
                 else:
                     underlying_exposure_short = -underlying_amt
-
 
                 # 2.整理b/s: 出于稳健性考量，股票市值由持仓数据计算得出: holding data + raw data + patch data
                 # 用现金代替可用，重点计算
