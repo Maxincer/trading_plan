@@ -17,6 +17,8 @@ def get_perfect_shape(net_asset, strategy, alpha_position_percent):
         short_amt_provided_by_future = future_contract_lots * future_contract_value
         stock_amt_final = short_amt_provided_by_future
 
-str_1 = 'ss,ss,ss'
-a = str_1.replace(',','2')
-print(a)
+
+fpath = r'D:\projects\trading_plan\data\trdrec_from_trdclient\1203_m_zhaos_2641.txt'
+with open(fpath, 'rb') as f:
+    list_datalines = f.readlines()
+    print(list_datalines)

@@ -93,8 +93,9 @@ class DBTradingData:
             dict_rec.update(dict(zip(list_keys, list_values)))
         return dict_rec
 
-    def read_rawdata_from_trdclient(self, fpath, str_c_h_t_mark, data_source_type, accttype):
+    def read_rawdata_from_trdclient(self, fpath, str_c_h_secdebt_mark, data_source_type, accttype):
         """
+        从客户端下载数据，并进行初步清洗。为字符串格式。
         从客户端下载数据，并进行初步清洗。为字符串格式。
         已更新券商处理格式：
             华泰: hexin, txt, cash, margin, capital, holding
@@ -108,12 +109,13 @@ class DBTradingData:
 
         :param fpath:
         :param accttype: c: cash, m: margin, f: future
-        :param str_c_h_t_mark: ['capital', 'holding']
+        :param str_c_h_secdebt_mark: ['capital', 'holding', 'secdebt']
         :param data_source_type:
         :return: list: 由dict rec组成的list
         """
         list_ret = []
-        if str_c_h_t_mark == 'capital':
+        print(fpath)
+        if str_c_h_secdebt_mark == 'capital':
             dict_rec_capital = {}
             if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'tf_hx', 'db_hx', 'wk_hx'] and accttype == 'c':
                 with open(fpath, 'rb') as f:
@@ -189,33 +191,20 @@ class DBTradingData:
                 raise ValueError('Field data_source_type not exist in basic info!')
             list_ret.append(dict_rec_capital)
 
-        elif str_c_h_t_mark == 'holding':
-            if (data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx',
-                                     'wk_hx', 'db_hx', 'tf_hx', 'yh_hx']) and (accttype in ['c', 'm']):
+        elif str_c_h_secdebt_mark == 'holding':
+            if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'zhaos_tdx', 'wk_hx', 'db_hx', 'tf_hx', 'yh_hx',
+                                    'xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     start_index_holding = None
                     for index, dataline in enumerate(list_datalines):
                         if '证券代码' in dataline.decode('gbk'):
                             start_index_holding = index
-                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split(b'\t')]
-                    i_list_keys_length = len(list_keys)
-
-                    for dataline in list_datalines[start_index_holding + 1:]:
-                        list_data = dataline.strip().split(b'\t')
-                        if len(list_data) == i_list_keys_length:
-                            list_values = [x.decode('gbk') for x in list_data]
-                            dict_rec_holding = dict(zip(list_keys, list_values))
-                            list_ret.append(dict_rec_holding)
-
-            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
-                with open(fpath, 'rb') as f:
-                    list_datalines = f.readlines()
-                    start_index_holding = None
-                    for index, dataline in enumerate(list_datalines):
-                        if '证券代码' in dataline.decode('gbk'):
-                            start_index_holding = index
-                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split(b'\t')]
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split()]
+                    list_keys_2b_dropped = ['折算汇率', '备注']
+                    for key_2b_dropped in list_keys_2b_dropped:
+                        if key_2b_dropped in list_keys:
+                            list_keys.remove(key_2b_dropped)
                     i_list_keys_length = len(list_keys)
 
                     for dataline in list_datalines[start_index_holding + 1:]:
@@ -235,7 +224,7 @@ class DBTradingData:
                     if '合计' in str_values:
                         continue
                     dict_rec_holding = dict(zip(list_keys, list_values))
-                    # 以下为不规则补充, todo
+                    # todo 自定义的补充
                     if accttype == 'm':
                         if '证券代码' in dict_rec_holding:
                             secid = dict_rec_holding['证券代码']
@@ -278,8 +267,37 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
+        elif str_c_h_secdebt_mark == 'secdebt':
+            """
+            卖均价为成交价格，
+            融券市值为最新价市值，
+            估值表中的负债在卖出后确认，（两融合同必备条款），
+            todo 需确认部分还券时的情况，如何数据处理
+            """
+            if data_source_type in ['zhaos_tdx'] and accttype in ['m']:
+                with open(fpath, 'rb') as f:
+                    list_datalines = f.readlines()
+                    start_index_secdebt = None
+                    for index, dataline in enumerate(list_datalines):
+                        str_dataline = dataline.decode('gbk')
+                        if '证券代码' in str_dataline:
+                            start_index_secdebt = index
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_secdebt].strip().split()]
+                    i_list_keys_length = len(list_keys)
+                    for dataline in list_datalines[start_index_secdebt + 1:]:
+                        list_data = dataline.strip().split()
+                        if len(list_data) == i_list_keys_length:
+                            list_values = [x.decode('gbk') for x in list_data]
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            # todo 自定义： 根据证券代码推测交易市场
+                            secid = dict_rec_holding['证券代码']
+                            if secid[0] in ['0', '1', '3']:
+                                dict_rec_holding['交易市场'] = '深A'
+                            else:
+                                dict_rec_holding['交易市场'] = '沪A'
+                            list_ret.append(dict_rec_holding)
         else:
-            raise ValueError('Wrong str_c_h_t_mark input!')
+            raise ValueError('Wrong str_c_h_secdebt_mark input!')
         return list_ret
 
     def update_rawdata(self):
@@ -287,9 +305,11 @@ class DBTradingData:
         1. 出于数据处理留痕及增强robust考虑，将原始数据按照原格式上传到mongoDB中备份
         2. 定义DataFilePath = ['fpath_capital_data'(source), 'fpath_holding_data'(source), 'fpath_trdrec_data(source)',]
         3. acctinfo数据库中DataFilePath存在文件路径即触发文件数据的上传。
+        4. 添加：融券未平仓合约数据的上传
         """
         col_manually_rawdata_capital = self.db_trddata['manually_rawdata_capital']
         col_manually_rawdata_holding = self.db_trddata['manually_rawdata_holding']
+        col_manually_rawdata_secdebt = self.db_trddata['manually_rawdata_secdebt']
         for _ in self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}):
             datafilepath = _['DataFilePath']
             if datafilepath:
@@ -298,18 +318,25 @@ class DBTradingData:
                 data_source_type = _['DataSourceType']
                 accttype = _['AcctType']
 
-                for ch in ['capital', 'holding']:
+                for ch in ['capital', 'holding', 'secdebt']:
                     if ch == 'capital':
                         fpath_relative = list_fpath_data[0]
                         col_manually_rawdata = col_manually_rawdata_capital
                     elif ch == 'holding':
                         fpath_relative = list_fpath_data[1]
                         col_manually_rawdata = col_manually_rawdata_holding
+                    elif ch == 'secdebt':
+                        if len(list_fpath_data) > 2:
+                            fpath_relative = list_fpath_data[2]
+                            col_manually_rawdata = col_manually_rawdata_secdebt
+                        else:
+                            continue
                     else:
                         raise ValueError('Value input not exist in capital and holding.')
 
                     col_manually_rawdata.delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                     fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
+                    print(fpath_absolute, ch, data_source_type, accttype)
                     list_dicts_rec = self.read_rawdata_from_trdclient(fpath_absolute, ch,
                                                                       data_source_type, accttype)
                     for _ in list_dicts_rec:
@@ -734,11 +761,17 @@ class DBTradingData:
                 list_dicts_holding = list(self.db_trddata['manually_rawdata_holding'].find(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
                 ))
+                list_dicts_secdebt = list(self.db_trddata['manually_rawdata_secdebt'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                ))
+                list_dicts_holding += list_dicts_secdebt
                 list_fields_secid = ['证券代码']
                 list_fields_symbol = ['证券名称']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
                 list_fields_exchange = ['交易市场', '交易板块', '板块']
-                list_fields_positionqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股']
+                list_fields_longqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股']
+                list_fields_shortqty = ['剩余数量']  # todo 猜测：未平仓合约的字段是这个
+                list_fields_cash_from_short_selling = ['融券卖出成本']  # 查询融券合约中无融券卖出所得现金
                 list_dicts_holding_fmtted = []
                 for dict_holding in list_dicts_holding:
                     secid = None
@@ -746,6 +779,7 @@ class DBTradingData:
                     symbol = None
                     longqty = 0
                     shortqty = 0
+                    cash_from_short_selling = 0
                     for field_secid in list_fields_secid:
                         if field_secid in dict_holding:
                             secid = str(dict_holding[field_secid])
@@ -769,14 +803,21 @@ class DBTradingData:
                                                       '上海A股': 'SSE', '深圳A股': 'SZSE',
                                                       }
                             secidsrc = dict_exchange2secidsrc[exchange]
-
                     for field_symbol in list_fields_symbol:
                         if field_symbol in dict_holding:
                             symbol = str(dict_holding[field_symbol])
 
-                    for field_positionqty in list_fields_positionqty:
-                        if field_positionqty in dict_holding:
-                            longqty = float(dict_holding[field_positionqty])
+                    for field_longqty in list_fields_longqty:
+                        if field_longqty in dict_holding:
+                            longqty = float(dict_holding[field_longqty])
+
+                    for field_shortqty in list_fields_shortqty:
+                        if field_shortqty in dict_holding:
+                            shortqty = float(dict_holding[field_shortqty])
+
+                    for field_cash_from_short_selling in list_fields_cash_from_short_selling:
+                        if field_cash_from_short_selling in dict_holding:
+                            cash_from_short_selling = float(dict_holding[field_cash_from_short_selling])
 
                     windcode_suffix = {'SZSE': '.SZ', 'SSE': '.SH'}[secidsrc]
                     windcode = secid + windcode_suffix
@@ -788,6 +829,8 @@ class DBTradingData:
                     shortamt = close * shortqty
                     netamt = longamt - shortamt
 
+                    # todo 20200626更：根据上交所《融资融券合同必备条款》推测（利息为实际使用天数），负债的计量依据为实际使用数量，则债=空
+                    # todo 此处忽略利息
                     dict_holding_fmtted = {
                         'DataDate': self.str_today,
                         'AcctIDByMXZ': acctidbymxz,
@@ -800,12 +843,12 @@ class DBTradingData:
                         'LongAmt': longamt,
                         'ShortAmt': shortamt,
                         'NetAmt': netamt,
-                        'PosCost_vec': None,
+                        'CashFromShortSelling': cash_from_short_selling,
                         'OTCContractUnitMarketValue': None,
-                        'LiabilityType': None,
-                        'Liability': 0,
-                        'LiabilityQty': None,
-                        'LiabilityAmt': None,
+                        'LiabilityType': (lambda x: 'security debt' if x > 0 else None)(shortamt),
+                        'Liability': shortamt,
+                        'LiabilityQty': (lambda x: x if x else None)(shortqty),  # 融券数量
+                        'LiabilityAmt': None,  # 融资数量
                         'InterestRate': None,
                         'DatedDate': None,
                         'UnderlyingSecurityID': None,
@@ -1018,10 +1061,10 @@ class DBTradingData:
                     'Liability': flt_liability,
                     'ApproximateNetAsset': flt_approximate_na,
                 }
-                self.db_trddata['b/s_by_acct'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+                self.db_trddata['b/s_by_acctidbymxz'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                 list_dict_bs = [dict_bs]
                 if dict_bs:
-                    self.db_trddata['b/s_by_acct'].insert_many(list_dict_bs)
+                    self.db_trddata['b/s_by_acctidbymxz'].insert_many(list_dict_bs)
 
                 exposure_long_amt = flt_etf_long_amt + flt_composite_long_amt + underlying_exposure_long
                 exposure_short_amt = flt_etf_short_amt + flt_composite_short_amt + underlying_exposure_short
@@ -1100,9 +1143,9 @@ class DBTradingData:
                     'SwapLongAmt': 0,
                     'TotalAsset': flt_approximate_na,
                 }
-                self.db_trddata['b/s_by_acct'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+                self.db_trddata['b/s_by_acctidbymxz'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                 if dict_future_bs:
-                    self.db_trddata['b/s_by_acct'].insert_one(dict_future_bs)
+                    self.db_trddata['b/s_by_acctidbymxz'].insert_one(dict_future_bs)
 
             else:
                 raise ValueError('Unknown account type in basic account info.')
@@ -1116,15 +1159,16 @@ class DBTradingData:
                 'NetExposure': exposure_net_amt,
                 'ApproximateNetAsset': flt_approximate_na,
             }
-            self.db_trddata['exposure_analysis_by_acct'].delete_many({'DataDate': self.str_today,
-                                                                      'AcctIDByMXZ': acctidbymxz})
+            self.db_trddata['exposure_analysis_by_acctidbymxz'].delete_many({'DataDate': self.str_today,
+                                                                             'AcctIDByMXZ': acctidbymxz})
             if dict_exposure_analysis:
-                self.db_trddata['exposure_analysis_by_acct'].insert_one(dict_exposure_analysis)
+                self.db_trddata['exposure_analysis_by_acctidbymxz'].insert_one(dict_exposure_analysis)
 
         print('Update capital and holding formatted by internal style finished.')
 
     def update_bs_by_prdcode_and_exposure_analysis_by_prdcode(self):
-        list_dicts_bs_by_acct = list(self.db_trddata['b/s_by_acct'].find({'DataDate': self.str_today}, {'_id': 0}))
+        list_dicts_bs_by_acct = list(self.db_trddata['b/s_by_acctidbymxz']
+                                     .find({'DataDate': self.str_today}, {'_id': 0}))
         df_bs_by_acct = pd.DataFrame(list_dicts_bs_by_acct)
         df_bs_by_prdcode = df_bs_by_acct.groupby(by='PrdCode').sum().reset_index()
         df_bs_by_prdcode['DataDate'] = self.str_today
@@ -1133,10 +1177,10 @@ class DBTradingData:
         if list_dicts_bs_by_prdcode:
             self.db_trddata['b/s_by_prdcode'].insert_many(list_dicts_bs_by_prdcode)
 
-        list_dicts_exposure_analysis_by_acct = list(self.db_trddata['exposure_analysis_by_acct']
+        list_dicts_exposure_analysis_by_acctidbymxz = list(self.db_trddata['exposure_analysis_by_acctidbymxz']
                                                     .find({'DataDate': self.str_today}, {'_id': 0}))
-        df_exposure_analysis_by_acct = pd.DataFrame(list_dicts_exposure_analysis_by_acct)
-        df_exposure_analysis_by_prdcode = df_exposure_analysis_by_acct.groupby(by='PrdCode').sum().reset_index()
+        df_exposure_analysis_by_acctidbymxz = pd.DataFrame(list_dicts_exposure_analysis_by_acctidbymxz)
+        df_exposure_analysis_by_prdcode = df_exposure_analysis_by_acctidbymxz.groupby(by='PrdCode').sum().reset_index()
         df_exposure_analysis_by_prdcode['DataDate'] = self.str_today
         df_exposure_analysis_by_prdcode['NetExposure(%)'] = (df_exposure_analysis_by_prdcode['NetExposure']
                                                              / df_exposure_analysis_by_prdcode['ApproximateNetAsset'])
