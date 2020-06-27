@@ -1,5 +1,5 @@
-
 from datetime import datetime
+import json
 
 import pymongo
 import pandas as pd
@@ -14,16 +14,30 @@ class DatabaseBasicInfo:
         db_basicinfo = dbclient['basicinfo']
         self.col_acctinfo = db_basicinfo['acctinfo']
         self.col_acctinfo.create_index([('DataDate', pymongo.DESCENDING), ('AcctIDByMXZ', pymongo.ASCENDING)])
-        self.col_myprdsinfo = db_basicinfo['myprdsinfo']
+        self.col_prdinfo = db_basicinfo['prdinfo']
 
-    def update_myprdsinfo(self):
-        df_myprdsinfo = pd.read_excel(self.fpath_basicinfo, sheet_name='myprdsinfo', dtype={'prdcode': str})
-        list_dicts_to_be_inserted = df_myprdsinfo.to_dict('records')
+    def update_prdinfo(self):
+        df_prdinfo = pd.read_excel(self.fpath_basicinfo,
+                                   sheet_name='prdinfo',
+                                   dtype={
+                                       'PrdCode': str,
+                                       'PrdName': str,
+                                       'Strategy': str,
+                                   })
+        df_prdinfo = df_prdinfo.where(df_prdinfo.notnull(), None)
+        list_dicts_to_be_inserted = df_prdinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
-            dict_to_be_inserted['date'] = self.str_today
-        self.col_myprdsinfo.delete_many({'date': self.str_today})
-        self.col_myprdsinfo.insert_many(list_dicts_to_be_inserted)
-        print('Collection "myprdsinfo" has been updated.')
+            dict_to_be_inserted['DataDate'] = self.str_today
+            if dict_to_be_inserted['Strategy']:
+                dict_strategy = json.loads(dict_to_be_inserted['Strategy'].replace("'", '"'))
+                if 'MN' not in dict_strategy:
+                    dict_strategy['MN'] = 0
+                if 'EI' not in dict_strategy:
+                    dict_strategy['EI'] = 0
+                dict_to_be_inserted['Strategy'] = dict_strategy
+        self.col_prdinfo.delete_many({'DataDate': self.str_today})
+        self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
+        print('Collection "prdinfo" has been updated.')
 
     def update_acctinfo(self):
         df_acctinfo = pd.read_excel(self.fpath_basicinfo,
@@ -50,10 +64,14 @@ class DatabaseBasicInfo:
         self.col_acctinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "acctinfo" has been updated.')
 
+    def run(self):
+        self.update_acctinfo()
+        self.update_prdinfo()
+
 
 if __name__ == '__main__':
     basicinfo = DatabaseBasicInfo()
-    basicinfo.update_acctinfo()
+    basicinfo.run()
 
 
 

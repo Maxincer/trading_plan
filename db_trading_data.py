@@ -1178,7 +1178,7 @@ class DBTradingData:
             self.db_trddata['b/s_by_prdcode'].insert_many(list_dicts_bs_by_prdcode)
 
         list_dicts_exposure_analysis_by_acctidbymxz = list(self.db_trddata['exposure_analysis_by_acctidbymxz']
-                                                    .find({'DataDate': self.str_today}, {'_id': 0}))
+                                                           .find({'DataDate': self.str_today}, {'_id': 0}))
         df_exposure_analysis_by_acctidbymxz = pd.DataFrame(list_dicts_exposure_analysis_by_acctidbymxz)
         df_exposure_analysis_by_prdcode = df_exposure_analysis_by_acctidbymxz.groupby(by='PrdCode').sum().reset_index()
         df_exposure_analysis_by_prdcode['DataDate'] = self.str_today
