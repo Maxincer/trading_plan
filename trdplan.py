@@ -8,6 +8,12 @@
 思路：
     1. 将每个账户抽象为类
     2. 将每个产品抽象为类
+Note:
+Abbr.:
+    1. cps: composite
+    2. MN: Market Neutral
+    3. EI: Enhanced Index
+    4. cpspct: composite percentage: composite amt / net asset value
 """
 from datetime import datetime
 import json
@@ -30,6 +36,7 @@ class GlobalVariable:
         self.col_prdinfo = self.db_basicinfo['prdinfo']
         self.col_bs_by_prdcode = self.db_trddata['b/s_by_prdcode']
         self.col_exposure_analysis_by_prdcode = self.db_trddata['exposure_analysis_by_prdcode']
+        self.col_exposure_analysis_by_acctidbymxz = self.db_trddata['exposure_analysis_by_acctidbymxz']
         self.col_bs_by_acctidbymxz = self.db_trddata['b/s_by_acctidbymxz']
         self.col_future_api_holding = self.db_trddata['future_api_holding']
         iter_dicts_acctinfo_rpt = self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1})
@@ -65,15 +72,16 @@ class Product:
         dict_exposure_analysis_by_prdcode = (self.gv.col_exposure_analysis_by_prdcode
                                              .find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today}))
         self.dict_prdinfo = self.gv.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
-        if self.dict_prdinfo['Strategy']:
-            self.dict_strategy = self.dict_prdinfo['Strategy']
+        if self.dict_prdinfo['StrategiesAllocation']:
+            self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         else:
-            self.dict_strategy = None
+            self.dict_strategies_allocation = None
         self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
         self.prd_short_exposure = dict_exposure_analysis_by_prdcode['ShortExposure']
         self.prd_net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
         self.prd_approximate_na = dict_bs_by_prdcode['ApproximateNetAsset']
         self.prd_ttasset = dict_bs_by_prdcode['TotalAsset']
+        self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
 
     def check_exposure(self):
         dict_exposure_analysis_by_prdcode = self.gv.col_exposure_analysis_by_prdcode.find_one(
@@ -81,7 +89,8 @@ class Product:
         )
         net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
         net_exposure_pct = dict_exposure_analysis_by_prdcode['NetExposure(%)']
-        net_exposure_pct_in_perfect_shape = 0.99 * self.dict_strategy['EI'] + 0 * self.dict_strategy['MN']
+        net_exposure_pct_in_perfect_shape = (0.99 * self.dict_strategies_allocation['EI']
+                                             + 0 * self.dict_strategies_allocation['MN'])
         net_exposure_in_perfect_shape = net_exposure_pct_in_perfect_shape * self.prd_approximate_na
         dif_net_exposure2ps = net_exposure - net_exposure_in_perfect_shape
         if abs(dif_net_exposure2ps) > 1000000:
@@ -102,6 +111,38 @@ class Product:
             acct = Account(self.gv, acctidbymxz)
             if acct.accttype == 'f':
                 acct.check_margin_in_f_acct()
+    
+    def get_perfect_shape(self, cpspct2na):
+        upper_limit_cpspct2na = 0
+        for key, value in self.dict_strategies_allocation.items():
+            upper_limit_cpspct2na_delta = self.dict_upper_limit_cpspct[key] * value
+            upper_limit_cpspct2na += upper_limit_cpspct2na_delta
+        if cpspct2na > upper_limit_cpspct2na:
+            raise ValueError('Composite percentage exceed upper limit.')
+
+        # shape假设1. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
+        na = 1
+
+        # 1. 分配MN策略涉及的账户资产
+        na_mn = na * self.dict_strategies_allocation['MN']
+        cpsamt_mn = na_mn * cpspct2na
+        # 根据合规要求，一个基金产品只能开立一个信用账户
+        dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
+        )
+        acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
+        dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
+            {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
+        )
+        short_exposure_from_macct = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+
+        # 2. 分配EI策略涉及的账户资产
+        na_ei = na * self.dict_strategies_allocation['EI']
+        cpsamt_ei = na_ei * cpspct2na
+
+
+
+
 
 
 class Account(Product):

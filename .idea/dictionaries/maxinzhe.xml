@@ -20,6 +20,8 @@
       <w>colfind</w>
       <w>colname</w>
       <w>colunms</w>
+      <w>cpsamt</w>
+      <w>cpspct</w>
       <w>datadate</w>
       <w>datafilepath</w>
       <w>datainline</w>
@@ -48,6 +50,7 @@
       <w>localholst</w>
       <w>longamt</w>
       <w>longqty</w>
+      <w>macct</w>
       <w>maxincer</w>
       <w>maxinzhe</w>
       <w>mingshi</w>

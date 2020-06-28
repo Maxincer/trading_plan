@@ -22,19 +22,19 @@ class DatabaseBasicInfo:
                                    dtype={
                                        'PrdCode': str,
                                        'PrdName': str,
-                                       'Strategy': str,
+                                       'StrategiesAllocation': str,
                                    })
         df_prdinfo = df_prdinfo.where(df_prdinfo.notnull(), None)
         list_dicts_to_be_inserted = df_prdinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['DataDate'] = self.str_today
-            if dict_to_be_inserted['Strategy']:
-                dict_strategy = json.loads(dict_to_be_inserted['Strategy'].replace("'", '"'))
-                if 'MN' not in dict_strategy:
-                    dict_strategy['MN'] = 0
-                if 'EI' not in dict_strategy:
-                    dict_strategy['EI'] = 0
-                dict_to_be_inserted['Strategy'] = dict_strategy
+            if dict_to_be_inserted['StrategiesAllocation']:
+                dict_strategy_allocation = json.loads(dict_to_be_inserted['StrategiesAllocation'].replace("'", '"'))
+                if 'MN' not in dict_strategy_allocation:
+                    dict_strategy_allocation['MN'] = 0
+                if 'EI' not in dict_strategy_allocation:
+                    dict_strategy_allocation['EI'] = 0
+                dict_to_be_inserted['StrategiesAllocation'] = dict_strategy_allocation
         self.col_prdinfo.delete_many({'DataDate': self.str_today})
         self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "prdinfo" has been updated.')
