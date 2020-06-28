@@ -15,8 +15,10 @@
       <w>apporoximate</w>
       <w>astock</w>
       <w>basicinfo</w>
+      <w>bgtamt</w>
       <w>bsitem</w>
       <w>cffex</w>
+      <w>cmacct</w>
       <w>colfind</w>
       <w>colname</w>
       <w>colunms</w>
@@ -34,6 +36,7 @@
       <w>dirpath</w>
       <w>dupatch</w>
       <w>ehtc</w>
+      <w>facct</w>
       <w>facctids</w>
       <w>faccts</w>
       <w>fext</w>
@@ -63,6 +66,7 @@
       <w>netasset</w>
       <w>nonetype</w>
       <w>nrows</w>
+      <w>oacct</w>
       <w>oracledb</w>
       <w>patchdata</w>
       <w>patchmark</w>
@@ -99,6 +103,7 @@
       <w>swapamt</w>
       <w>swhy</w>
       <w>szse</w>
+      <w>tgtitems</w>
       <w>trdclient</w>
       <w>trddata</w>
       <w>trdrec</w>

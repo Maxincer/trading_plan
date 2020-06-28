@@ -1,5 +1,6 @@
 # 算法： perfect shape
 # coding:utf-8
+from pymongo import MongoClient
 from math import floor
 
 net_asset = 13650
@@ -17,8 +18,6 @@ def get_perfect_shape(net_asset, strategy, alpha_position_percent):
         short_amt_provided_by_future = future_contract_lots * future_contract_value
         stock_amt_final = short_amt_provided_by_future
 
-
-fpath = r'D:\projects\trading_plan\data\trdrec_from_trdclient\1203_m_zhaos_2641.txt'
-with open(fpath, 'rb') as f:
-    list_datalines = f.readlines()
-    print(list_datalines)
+dict_917 = MongoClient('mongodb://localhost:27017/')['basicinfo']['prdinfo'].find_one({'PrdCode': '917'})
+a = dict_917['NetAssetAllocation']
+print('done')

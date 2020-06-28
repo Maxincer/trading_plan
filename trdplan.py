@@ -9,6 +9,7 @@
     1. 将每个账户抽象为类
     2. 将每个产品抽象为类
 Note:
+    1. ETF: exchange traded fund: 交易所交易基金，不存在场外ETF。 重要假设
 Abbr.:
     1. cps: composite
     2. MN: Market Neutral
@@ -16,7 +17,7 @@ Abbr.:
     4. cpspct: composite percentage: composite amt / net asset value
 """
 from datetime import datetime
-import json
+from math import ceil, floor
 
 import pandas as pd
 import pymongo
@@ -47,12 +48,15 @@ class GlobalVariable:
         self.list_prdcodes = list(set_prdcodes)
         self.list_prdcodes.sort()
         self.dict_index_future2multiplier = {'IC': 200, 'IF': 300, 'IH': 300}
+        self.dict_index_future2spot = {'IC': '000905.SH', 'IF': '000300.SH', 'IH': '000016.SH'}
+        self.flt_facct_internal_required_margin_rate = 0.2
 
         w.start()
         set_ic_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014872000000").Data[1])
         set_if_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=a599010102000000").Data[1])
         set_ih_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014871000000").Data[1])
-        set_index_future_windcodes = set_ic_windcode | set_if_windcode | set_ih_windcode
+        set_custom = {'000905.SH', '000300.SH', '000016.SH'}
+        set_index_future_windcodes = set_ic_windcode | set_if_windcode | set_ih_windcode | set_custom
         str_query_close = ','.join(set_index_future_windcodes)
         wss_close = w.wss(str_query_close, "close", f"tradeDate={self.str_today};priceAdj=U;cycle=D")
         list_codes = wss_close.Codes
@@ -76,6 +80,9 @@ class Product:
             self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         else:
             self.dict_strategies_allocation = None
+        self.dict_na_allocation = self.dict_prdinfo['NetAssetAllocation']
+        self.tgt_cpspct = self.dict_prdinfo['TargetCompositePercentage']
+        self.tgt_items = self.dict_prdinfo['TargetItems']
         self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
         self.prd_short_exposure = dict_exposure_analysis_by_prdcode['ShortExposure']
         self.prd_net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
@@ -111,37 +118,159 @@ class Product:
             acct = Account(self.gv, acctidbymxz)
             if acct.accttype == 'f':
                 acct.check_margin_in_f_acct()
-    
-    def get_perfect_shape(self, cpspct2na):
-        upper_limit_cpspct2na = 0
-        for key, value in self.dict_strategies_allocation.items():
-            upper_limit_cpspct2na_delta = self.dict_upper_limit_cpspct[key] * value
-            upper_limit_cpspct2na += upper_limit_cpspct2na_delta
-        if cpspct2na > upper_limit_cpspct2na:
-            raise ValueError('Composite percentage exceed upper limit.')
 
-        # shape假设1. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
-        na = 1
+    def cmp_f_lots(self, strategy, bgt_exposure_from_future, ic_if_ih):
+        ic_if_ih = ic_if_ih.upper()
+        contract_value_spot = (self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
+                               * self.gv.dict_index_future2multiplier)
+        flt_lots = bgt_exposure_from_future / contract_value_spot
+        if strategy == 'MN':
+            int_lots = round(flt_lots)
+        elif strategy == 'EI':
+            int_lots = floor(flt_lots)
+        else:
+            raise ValueError('Unknown strategy when cmp f lots.')
+        return int_lots
+
+    def budget(self):
+        """
+        假设：
+        1. 有target用target覆盖，无target就用现值
+        2. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
+        Note:
+            1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配
+        思路：
+            1. 先求EI的shape，剩下的都是MN的。
+        """
+        ic_if_ih = 'IC'  # todo 可进一步抽象， 与空头策略有关
+        cpspct2na = self.tgt_cpspct
+        na_bgt = self.prd_approximate_na
+        if self.tgt_items['net_asset']:
+            na_bgt = self.tgt_items['net_asset']
+        # 1. EI策略budget
+        ei_na_bgt = na_bgt * self.dict_strategies_allocation['EI']
+        cpsamt_ei = ei_na_bgt * cpspct2na
+        ei_long_exposure_from_facct = ei_na_bgt - cpsamt_ei
+        ei_int_lots_index_future_bgt = self.cmp_f_lots('EI', ei_long_exposure_from_facct, ic_if_ih)
+        ei_long_exposure_from_facct_bgt = (
+                ei_int_lots_index_future_bgt
+                * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
+                * self.gv.dict_index_future2multiplier[ic_if_ih]
+        )
+        ei_long_exposure_from_cpsamt_bgt = ei_na_bgt - ei_long_exposure_from_facct_bgt
+
+
+        # 以下是MN涉及算法
 
         # 1. 分配MN策略涉及的账户资产
-        na_mn = na * self.dict_strategies_allocation['MN']
-        cpsamt_mn = na_mn * cpspct2na
+        na_mn_bgt = na_bgt * self.dict_strategies_allocation['MN']
+        long_exposure_from_cpsamt_mn_bgt = na_mn_bgt * cpspct2na
+
+        # 求信用户提供的空头暴露预算值
         # 根据合规要求，一个基金产品只能开立一个信用账户
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
         )
-        acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
-        dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
-            {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
+        short_exposure_from_macct = 0
+        if dict_macct_basicinfo:
+            acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
+            dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
+            )
+            short_exposure_from_macct = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+        short_exposure_from_macct_bgt = short_exposure_from_macct
+        if self.tgt_items['short_exposure_from_macct']:
+            short_exposure_from_macct_bgt = self.tgt_items['short_exposure_from_macct']
+
+        # 求场外户和自定义账户提供的空头暴露预算值与多头暴露预算值
+        # 求场外户和自定义账户中的存出保证金（net_asset）
+        list_dicts_oacct_basicinfo = list(
+            self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o'})
         )
-        short_exposure_from_macct = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+        short_exposure_from_oacct = 0
+        long_exposure_from_oacct = 0
+        approximate_na_oacct = 0
+        for dict_oacct_basicinfo in list_dicts_oacct_basicinfo:
+            if dict_oacct_basicinfo:
+                acctidbymxz_oacct = dict_oacct_basicinfo['AcctIDByMXZ']
+                dict_exposure_analysis_by_acctidbymxz = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
+                )
+                short_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+                short_exposure_from_oacct += short_exposure_from_oacct_delta
+                long_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['LongExposure']
+                long_exposure_from_oacct += long_exposure_from_oacct_delta
+                dict_bs_by_acctidbymxz = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
+                )
+                approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+                approximate_na_oacct += approximate_na_oacct_delta
 
-        # 2. 分配EI策略涉及的账户资产
-        na_ei = na * self.dict_strategies_allocation['EI']
-        cpsamt_ei = na_ei * cpspct2na
+        short_exposure_from_oacct_bgt = short_exposure_from_oacct
+        if self.tgt_items['short_exposure_from_oacct']:
+            short_exposure_from_oacct_bgt = self.tgt_items['short_exposure_from_oacct']
+        long_exposure_from_oacct_bgt = long_exposure_from_oacct
+        if self.tgt_items['long_exposure_from_oacct']:
+            long_exposure_from_oacct_bgt = self.tgt_items['long_exposure_from_oacct']
 
 
 
+        # 求期货户提供的多空暴露预算值
+        # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
+        list_dicts_faccts_basicinfo = list(
+            self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'f'})
+        )
+        long_exposure_from_facct = 0
+        short_exposure_from_facct = 0
+        for dict_facct_basicinfo in list_dicts_faccts_basicinfo:
+            acctidbymxz_facct = dict_facct_basicinfo['AcctIDByMXZ']
+            dict_exposure_analysis_by_acctidbymxz = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_facct}
+            )
+            long_exposure_from_facct_delta = dict_exposure_analysis_by_acctidbymxz['LongExposure']
+            long_exposure_from_facct += long_exposure_from_facct_delta
+            short_exposure_from_facct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+            short_exposure_from_facct += short_exposure_from_facct_delta
+
+        long_exposure_from_facct_bgt = long_exposure_from_facct
+        if self.tgt_items['long_exposure_from_facct']:
+            long_exposure_from_facct_bgt = self.tgt_items['long_exposure_from_facct']
+
+        long_exposure_total_bgt = (long_exposure_from_cpsamt_mn_bgt
+                                   + long_exposure_from_oacct_bgt
+                                   + long_exposure_from_facct_bgt)
+
+        short_exposure_from_facct_bgt = (long_exposure_total_bgt
+                                         - short_exposure_from_macct_bgt
+                                         - short_exposure_from_oacct_bgt)
+        int_lots_index_future_short_bgt = self.cmp_f_lots('MN', short_exposure_from_facct_bgt, ic_if_ih)
+        short_exposure_from_facct_bgt = (
+                int_lots_index_future_short_bgt
+                * self.gv.dict_index_future2multiplier[ic_if_ih]
+                * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
+        )
+        na_facct_bgt = short_exposure_from_facct_bgt * self.gv.flt_facct_internal_required_margin_rate
+
+        na_oacct_bgt = approximate_na_oacct
+
+        short_exposure_bgt = (short_exposure_from_facct_bgt
+                              + short_exposure_from_macct_bgt
+                              + short_exposure_from_oacct_bgt)
+        dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+        long_exposure_from_etf = dict_bs_by_prdcode['ETFLongAmt']
+        long_exposure_from_etf_bgt = long_exposure_from_etf
+        if self.tgt_items['long_exposure_from_etf']:
+            long_exposure_from_etf_bgt = self.tgt_items['long_exposure_from_etf']
+
+        long_exposure_bgt = short_exposure_bgt
+        long_exposure_from_cpsamt_mn_bgt = (long_exposure_bgt
+                                            - long_exposure_from_oacct_bgt
+                                            - long_exposure_from_facct_bgt
+                                            - long_exposure_from_etf_bgt)
+        na_cmacct_bgt = na_mn_bgt - na_facct_bgt - na_oacct_bgt
+
+
+        # 账户资金分配
 
 
 

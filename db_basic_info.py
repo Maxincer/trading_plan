@@ -23,6 +23,9 @@ class DatabaseBasicInfo:
                                        'PrdCode': str,
                                        'PrdName': str,
                                        'StrategiesAllocation': str,
+                                       'NetAssetAllocation': str,
+                                       'TargetCompositePercentage': float,
+                                       'TargetItems': str,
                                    })
         df_prdinfo = df_prdinfo.where(df_prdinfo.notnull(), None)
         list_dicts_to_be_inserted = df_prdinfo.to_dict('records')
@@ -35,6 +38,18 @@ class DatabaseBasicInfo:
                 if 'EI' not in dict_strategy_allocation:
                     dict_strategy_allocation['EI'] = 0
                 dict_to_be_inserted['StrategiesAllocation'] = dict_strategy_allocation
+            if dict_to_be_inserted['NetAssetAllocation']:
+                dict_na_allocation = json.loads(dict_to_be_inserted['NetAssetAllocation'].replace("'", '"'))
+                dict_to_be_inserted['NetAssetAllocation'] = dict_na_allocation
+            if dict_to_be_inserted['TargetItems']:
+                dict_tgtitems = json.loads(dict_to_be_inserted['TargetItems'].replace("'", '"'))
+                if 'short_exposure_from_macct' not in dict_tgtitems:
+                    dict_tgtitems['short_exposure_from_macct'] = None
+                if 'short_exposure_from_oacct' not in dict_tgtitems:
+                    dict_tgtitems['short_exposure_from_oacct'] = None
+                if 'net_asset' not in dict_tgtitems:
+                    dict_tgtitems['net_asset'] = None
+                dict_to_be_inserted['TargetItems'] = dict_tgtitems
         self.col_prdinfo.delete_many({'DataDate': self.str_today})
         self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "prdinfo" has been updated.')
