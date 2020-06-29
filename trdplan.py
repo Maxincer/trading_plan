@@ -119,11 +119,11 @@ class Product:
             if acct.accttype == 'f':
                 acct.check_margin_in_f_acct()
 
-    def cmp_f_lots(self, strategy, bgt_exposure_from_future, ic_if_ih):
+    def cmp_f_lots(self, strategy, tgt_exposure_from_future, ic_if_ih):
         ic_if_ih = ic_if_ih.upper()
         contract_value_spot = (self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
                                * self.gv.dict_index_future2multiplier)
-        flt_lots = bgt_exposure_from_future / contract_value_spot
+        flt_lots = tgt_exposure_from_future / contract_value_spot
         if strategy == 'MN':
             int_lots = round(flt_lots)
         elif strategy == 'EI':
@@ -137,50 +137,84 @@ class Product:
         假设：
         1. 有target用target覆盖，无target就用现值
         2. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
+        3. 重要： EI策略中不使用ETF来补充beta
         Note:
             1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配
         思路：
             1. 先求EI的shape，剩下的都是MN的。
+        todo 数据库中的仓位比例为cpslongamt的比例
         """
+        # 参数部分 与 假设
         ic_if_ih = 'IC'  # todo 可进一步抽象， 与空头策略有关
-        cpspct2na = self.tgt_cpspct
-        na_bgt = self.prd_approximate_na
+
+        # EI 策略预算假设
+        flt_ei_cash2cpslongamt = 0.0888
+        flt_ei_internal_required_margin_rate = 0.2
+        ei_na_oaccts_tgt = 0
+        ei_net_exposure_in_oaccts = 0
+        ei_cpsshortamt_tgt = 0
+        ei_etflongamt_tgt = 0
+        ei_etfshortamt_tgt = 0
+
+        # MN 策略预算假设
+        flt_mn_cash2cpsamt = 0.987
+
+        # 算法部分
+        tgt_na = self.prd_approximate_na
         if self.tgt_items['net_asset']:
-            na_bgt = self.tgt_items['net_asset']
+            tgt_na = self.tgt_items['net_asset']
+
         # 1. EI策略budget
-        ei_na_bgt = na_bgt * self.dict_strategies_allocation['EI']
-        cpsamt_ei = ei_na_bgt * cpspct2na
-        ei_long_exposure_from_facct = ei_na_bgt - cpsamt_ei
-        ei_int_lots_index_future_bgt = self.cmp_f_lots('EI', ei_long_exposure_from_facct, ic_if_ih)
-        ei_long_exposure_from_facct_bgt = (
-                ei_int_lots_index_future_bgt
+        ei_na_tgt = tgt_na * self.dict_strategies_allocation['EI']
+        ei_cpslongamt_tgt = ei_na_tgt * self.tgt_cpspct
+        ei_long_exposure_from_faccts = (ei_na_tgt
+                                        - (ei_cpslongamt_tgt
+                                           + ei_etflongamt_tgt
+                                           - ei_cpsshortamt_tgt
+                                           - ei_etfshortamt_tgt))
+        ei_int_lots_index_future_tgt = self.cmp_f_lots('EI', ei_long_exposure_from_faccts, ic_if_ih)
+        ei_long_exposure_from_faccts_tgt = (
+                ei_int_lots_index_future_tgt
                 * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
                 * self.gv.dict_index_future2multiplier[ic_if_ih]
         )
-        ei_long_exposure_from_cpsamt_bgt = ei_na_bgt - ei_long_exposure_from_facct_bgt
+        ei_na_faccts_tgt = ei_long_exposure_from_faccts_tgt * flt_ei_internal_required_margin_rate
+        ei_cpslongamt_tgt = (ei_na_tgt
+                             - ei_long_exposure_from_faccts_tgt
+                             + ei_cpsshortamt_tgt
+                             + ei_etfshortamt_tgt
+                             - ei_etflongamt_tgt)
+        ei_cash_in_saccts_tgt = flt_ei_cash2cpslongamt * ei_cpslongamt_tgt
+        ei_na_saccts_tgt = ei_na_tgt - ei_na_faccts_tgt - ei_na_oaccts_tgt
+        ei_ce_in_saccts_tgt = (ei_na_saccts_tgt
+                               - ei_cpslongamt_tgt
+                               - ei_cash_in_saccts_tgt
+                               - ei_etflongamt_tgt
+                               + ei_etfshortamt_tgt)
 
-
-        # 以下是MN涉及算法
-
+        # 2. MN策略budget
         # 1. 分配MN策略涉及的账户资产
-        na_mn_bgt = na_bgt * self.dict_strategies_allocation['MN']
-        long_exposure_from_cpsamt_mn_bgt = na_mn_bgt * cpspct2na
+        mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
+        mn_cpsamt_tgt = mn_na_tgt * self.tgt_cpspct
 
         # 求信用户提供的空头暴露预算值
-        # 根据合规要求，一个基金产品只能开立一个信用账户
+        # 一个基金产品只能开立一个信用账户
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
         )
-        short_exposure_from_macct = 0
+        mn_short_exposure_from_macct = 0
         if dict_macct_basicinfo:
             acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
-            dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
+            dict_bs_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
             )
-            short_exposure_from_macct = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
-        short_exposure_from_macct_bgt = short_exposure_from_macct
+            mn_cpsshortamt_macct = dict_bs_by_acctidbymxz['CompositeShortAmt']
+            mn_etfshortamt_macct = dict_bs_by_acctidbymxz['ETFShortAmt']
+
+
+        mn_short_exposure_from_macct_tgt = mn_short_exposure_from_macct
         if self.tgt_items['short_exposure_from_macct']:
-            short_exposure_from_macct_bgt = self.tgt_items['short_exposure_from_macct']
+            mn_short_exposure_from_macct_tgt = self.tgt_items['short_exposure_from_macct']
 
         # 求场外户和自定义账户提供的空头暴露预算值与多头暴露预算值
         # 求场外户和自定义账户中的存出保证金（net_asset）
@@ -206,14 +240,12 @@ class Product:
                 approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
                 approximate_na_oacct += approximate_na_oacct_delta
 
-        short_exposure_from_oacct_bgt = short_exposure_from_oacct
+        short_exposure_from_oacct_tgt = short_exposure_from_oacct
         if self.tgt_items['short_exposure_from_oacct']:
-            short_exposure_from_oacct_bgt = self.tgt_items['short_exposure_from_oacct']
-        long_exposure_from_oacct_bgt = long_exposure_from_oacct
+            short_exposure_from_oacct_tgt = self.tgt_items['short_exposure_from_oacct']
+        long_exposure_from_oacct_tgt = long_exposure_from_oacct
         if self.tgt_items['long_exposure_from_oacct']:
-            long_exposure_from_oacct_bgt = self.tgt_items['long_exposure_from_oacct']
-
-
+            long_exposure_from_oacct_tgt = self.tgt_items['long_exposure_from_oacct']
 
         # 求期货户提供的多空暴露预算值
         # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
@@ -232,46 +264,87 @@ class Product:
             short_exposure_from_facct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
             short_exposure_from_facct += short_exposure_from_facct_delta
 
-        long_exposure_from_facct_bgt = long_exposure_from_facct
+        long_exposure_from_facct_tgt = long_exposure_from_facct
         if self.tgt_items['long_exposure_from_facct']:
-            long_exposure_from_facct_bgt = self.tgt_items['long_exposure_from_facct']
+            long_exposure_from_facct_tgt = self.tgt_items['long_exposure_from_facct']
 
-        long_exposure_total_bgt = (long_exposure_from_cpsamt_mn_bgt
-                                   + long_exposure_from_oacct_bgt
-                                   + long_exposure_from_facct_bgt)
+        long_exposure_total_tgt = (long_exposure_from_cpsamt_mn_tgt
+                                   + long_exposure_from_oacct_tgt
+                                   + long_exposure_from_facct_tgt)
 
-        short_exposure_from_facct_bgt = (long_exposure_total_bgt
-                                         - short_exposure_from_macct_bgt
-                                         - short_exposure_from_oacct_bgt)
-        int_lots_index_future_short_bgt = self.cmp_f_lots('MN', short_exposure_from_facct_bgt, ic_if_ih)
-        short_exposure_from_facct_bgt = (
-                int_lots_index_future_short_bgt
+        short_exposure_from_facct_tgt = (long_exposure_total_tgt
+                                         - short_exposure_from_macct_tgt
+                                         - short_exposure_from_oacct_tgt)
+        int_lots_index_future_short_tgt = self.cmp_f_lots('MN', short_exposure_from_facct_tgt, ic_if_ih)
+        short_exposure_from_facct_tgt = (
+                int_lots_index_future_short_tgt
                 * self.gv.dict_index_future2multiplier[ic_if_ih]
                 * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
         )
-        na_facct_bgt = short_exposure_from_facct_bgt * self.gv.flt_facct_internal_required_margin_rate
+        na_facct_tgt = short_exposure_from_facct_tgt * self.gv.flt_facct_internal_required_margin_rate
 
-        na_oacct_bgt = approximate_na_oacct
+        na_oacct_tgt = approximate_na_oacct
 
-        short_exposure_bgt = (short_exposure_from_facct_bgt
-                              + short_exposure_from_macct_bgt
-                              + short_exposure_from_oacct_bgt)
+        short_exposure_tgt = (short_exposure_from_facct_tgt
+                              + short_exposure_from_macct_tgt
+                              + short_exposure_from_oacct_tgt)
         dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         long_exposure_from_etf = dict_bs_by_prdcode['ETFLongAmt']
-        long_exposure_from_etf_bgt = long_exposure_from_etf
+        long_exposure_from_etf_tgt = long_exposure_from_etf
         if self.tgt_items['long_exposure_from_etf']:
-            long_exposure_from_etf_bgt = self.tgt_items['long_exposure_from_etf']
+            long_exposure_from_etf_tgt = self.tgt_items['long_exposure_from_etf']
 
-        long_exposure_bgt = short_exposure_bgt
-        long_exposure_from_cpsamt_mn_bgt = (long_exposure_bgt
-                                            - long_exposure_from_oacct_bgt
-                                            - long_exposure_from_facct_bgt
-                                            - long_exposure_from_etf_bgt)
-        na_cmacct_bgt = na_mn_bgt - na_facct_bgt - na_oacct_bgt
+        long_exposure_tgt = short_exposure_tgt
+        long_exposure_from_cpsamt_mn_tgt = (long_exposure_tgt
+                                            - long_exposure_from_oacct_tgt
+                                            - long_exposure_from_facct_tgt
+                                            - long_exposure_from_etf_tgt)
+        na_cmacct_tgt = na_mn_tgt - na_facct_tgt - na_oacct_tgt
 
-
-        # 账户资金分配
-
+        dict_tgt = {
+            'TargetNetAsset': tgt_na,
+            'EI': {
+                'EINetAsset': {
+                    'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
+                    'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
+                    'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
+                    'EINetAsset': ei_na_tgt,
+                    'NetAssetAllocationBetweenCapitalSources': {},
+                },
+                'EIPosition': {
+                    'EICashOfSecurityAccount': ei_cash_in_saccts_tgt,
+                    'EICashEquivalentOfSecurityAccount': ei_ce_in_saccts_tgt,
+                    'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
+                    'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
+                    'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
+                    'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
+                    'EIContractsNetAmountOfFutureAccounts': ei_long_exposure_from_faccts,
+                    'EIContractsNetLotsOfFutureAccounts': ei_int_lots_index_future_tgt,
+                    'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
+                    'PositionAllocationBetweenCapitalSources': {},
+                }
+            },
+            'MN': {
+                'MNNetAsset': {
+                    'MNNetAssetOfStockAccounts': mn_cpsamt_tgt,
+                    'MNNetAssetOfFutureAccounts': None,
+                    'MNNetAssetOfOTCAccounts': None,
+                    'MNNetAsset': None,
+                    'NetAssetAllocationBetweenCapitalSources': {},
+                },
+                'MNPosition': {
+                    'MNCashOfSecurityAccount': None,
+                    'MNCashEquivalentOfSecurityAccount': None,
+                    'MNCompositeLongAmountOfSecurityAccounts': None,
+                    'MNCompositeShortAmountOfSecurityAccounts': None,
+                    'MNETFNetAmountOfSecurityAccounts': None,
+                    'MNContractsNetAmountOfFutureAccounts': None,
+                    'MNContractsNetLotsOfFutureAccounts': None,
+                    'MNNetExposureFromOTCAccounts': None,
+                    'PositionAllocationBetweenCapitalSources': {},
+                }
+            },
+        }
 
 
 class Account(Product):

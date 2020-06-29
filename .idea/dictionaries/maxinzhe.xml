@@ -23,7 +23,9 @@
       <w>colname</w>
       <w>colunms</w>
       <w>cpsamt</w>
+      <w>cpslongamt</w>
       <w>cpspct</w>
+      <w>cpsshortamt</w>
       <w>datadate</w>
       <w>datafilepath</w>
       <w>datainline</w>
@@ -36,6 +38,8 @@
       <w>dirpath</w>
       <w>dupatch</w>
       <w>ehtc</w>
+      <w>etflongamt</w>
+      <w>etfshortamt</w>
       <w>facct</w>
       <w>facctids</w>
       <w>faccts</w>
@@ -67,6 +71,7 @@
       <w>nonetype</w>
       <w>nrows</w>
       <w>oacct</w>
+      <w>oaccts</w>
       <w>oracledb</w>
       <w>patchdata</w>
       <w>patchmark</w>
@@ -83,6 +88,8 @@
       <w>recdata</w>
       <w>rptaccts</w>
       <w>rptmark</w>
+      <w>sacct</w>
+      <w>saccts</w>
       <w>seccode</w>
       <w>secdebt</w>
       <w>secid</w>
