@@ -365,15 +365,18 @@ class Account(Product):
         self.acct_composite_long_amt = self.dict_bs_by_acctidbymxz['CompositeLongAmt']
         self.acct_approximate_na = self.dict_bs_by_acctidbymxz['ApproximateNetAsset']
 
-    def check_margin_in_f_acct(self, margin_rate_in_perfect_shape=0.2):
+    def check_margin_in_f_acct(self):
         # todo 假设持仓均为股指
         # 参考： 中金所 “跨品种” 单向大边保证金制度，上期所，单向大边保证金制度
         # 资料来源：上海期货交易所结算细则
         # 同一客户在同一会员处的同品种期货合约双向持仓（期货合约进入最后交易日前第五个交易日闭市后除外）
         # 对IC、IH、IF跨品种双向持仓，按照交易保证金单边较大者收取交易保证金
+        margin_rate_in_perfect_shape = 0.2
+        margin_rate_warning = 0.15
         list_dicts_future_api_holding = list(self.gv.col_future_api_holding
                                              .find({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
         margin_required_in_perfect_shape = 0
+        margin_warning = 0
         if list_dicts_future_api_holding:
             list_illegal_contract = []
             for dict_future_api_holding in list_dicts_future_api_holding:
@@ -395,28 +398,42 @@ class Account(Product):
                                                                          * df_future_api_holding['multiplier']
                                                                          * df_future_api_holding['close']
                                                                          * margin_rate_in_perfect_shape)
+            df_future_api_holding['margin_warning'] = (df_future_api_holding['position']
+                                                       * df_future_api_holding['multiplier']
+                                                       * df_future_api_holding['close']
+                                                       * margin_rate_warning)
             # 跨品种单向大边保证金制度
             dicts_future_api_holding_sum_by_direction = (df_future_api_holding
-                                                         .loc[:, ['direction', 'margin_required_in_perfect_shape']]
+                                                         .loc[:, ['direction',
+                                                                  'margin_required_in_perfect_shape',
+                                                                  'margin_warning']]
                                                          .groupby(by='direction')
                                                          .sum()
                                                          .to_dict())
             dict_direction2margin_required_in_perfect_shape = \
                 dicts_future_api_holding_sum_by_direction['margin_required_in_perfect_shape']
+            dict_direction2margin_warning = dicts_future_api_holding_sum_by_direction['margin_warning']
             if 'long' not in dict_direction2margin_required_in_perfect_shape:
                 dict_direction2margin_required_in_perfect_shape['long'] = 0
+                dict_direction2margin_warning['long'] = 0
             if 'short' not in dict_direction2margin_required_in_perfect_shape:
                 dict_direction2margin_required_in_perfect_shape['short'] = 0
+                dict_direction2margin_warning['short'] = 0
 
             margin_required_by_long = dict_direction2margin_required_in_perfect_shape['long']
             margin_required_by_short = dict_direction2margin_required_in_perfect_shape['short']
             margin_required_in_perfect_shape = max(margin_required_by_long, margin_required_by_short)
 
+            margin_warning_by_long = dict_direction2margin_warning['long']
+            margin_warning_by_short = dict_direction2margin_warning['short']
+            margin_warning = max(margin_warning_by_long, margin_warning_by_short)
+
         dict_bs_by_acctidbymxz = (self.gv.col_bs_by_acctidbymxz
                                   .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
         approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+        dif_margin_warning = approximate_na - margin_warning
         dif_margin_required_in_perfect_shape_approximate_na = approximate_na - margin_required_in_perfect_shape
-        if dif_margin_required_in_perfect_shape_approximate_na < 0:
+        if dif_margin_warning < 0:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,

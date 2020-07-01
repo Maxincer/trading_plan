@@ -542,7 +542,7 @@ class DBTradingData:
             wss_astock.Data, index=wss_astock.Fields, columns=wss_astock.Codes
         ).T.reset_index().rename(columns={'index': 'WindCode', 'SEC_NAME': 'Symbol', 'CLOSE': 'Close'})
         list_dicts_mktpatch = [
-            {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 100},
+            {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 1000},  # 华泰核新 单价1000
             {'WindCode': '511990.SH', 'Symbol': '华宝添益', 'Close': 100},
             {'WindCode': '511880.SH', 'Symbol': '银河日利', 'Close': 100}
         ]
