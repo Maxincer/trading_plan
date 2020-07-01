@@ -896,8 +896,16 @@ class DBTradingData:
                             underlying_net_exposure_delta = dict_holding_patchdata['UnderlyingAmt']
                             underlying_net_exposure += underlying_net_exposure_delta
                         if underlying_sectype in ['Index Future']:
-                            # todo 将IC合约算为000905
-                            pass
+                            underlying_secid = dict_holding_patchdata['UnderlyingSecurityID']
+                            underlying_index_future = underlying_secid[:2]
+                            dict_index_future2index_spot_wcode = {'IC': '000905.SH', 'IF': '000300.SH',
+                                                                  'IH': '000016.SH'}
+                            close = dict_wcode2close[dict_index_future2index_spot_wcode[underlying_index_future]]
+                            underlyingqty = dict_holding_patchdata['UnderlyingQty']
+                            dict_index_future2multiplier = {'IC': 200, 'IF': 300, 'IH': 300}
+                            multiplier = dict_index_future2multiplier[underlying_index_future]
+                            underlying_net_exposure_delta = underlyingqty * close * multiplier
+                            underlying_net_exposure += underlying_net_exposure_delta
                         list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata)
                 list_dicts_holding_fmtted_patched = list_dicts_holding_fmtted + list_dicts_holding_patchdata_fmtted
                 self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
