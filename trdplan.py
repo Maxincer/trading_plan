@@ -27,7 +27,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200624'
+        # self.str_today = '20200624'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -102,14 +102,14 @@ class Product:
         dif_net_exposure2ps = net_exposure - net_exposure_in_perfect_shape
         if abs(dif_net_exposure2ps) > 1000000:
             dict_item_2b_adjusted = {
-                self.prdcode: {
+                    'DataDate': self.str_today,
+                    'PrdCode': self.prdcode,
                     'NetExposure': net_exposure,
                     'NetExposure(%)': net_exposure_pct,
                     'NetExposureInPerfectShape': net_exposure_in_perfect_shape,
                     'NetExposure(%)InPerfectShape': net_exposure_pct_in_perfect_shape,
                     'NetExposureDif2PS': dif_net_exposure2ps
                 }
-            }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
     def check_exception(self):
@@ -118,6 +118,8 @@ class Product:
             acct = Account(self.gv, acctidbymxz)
             if acct.accttype == 'f':
                 acct.check_margin_in_f_acct()
+            if acct.accttype in ['c', 'm']:
+                acct.check_cash_in_c_m_acct()
 
     def cmp_f_lots(self, strategy, tgt_exposure_from_future, ic_if_ih):
         ic_if_ih = ic_if_ih.upper()
@@ -268,83 +270,83 @@ class Product:
         if self.tgt_items['long_exposure_from_facct']:
             long_exposure_from_facct_tgt = self.tgt_items['long_exposure_from_facct']
 
-        long_exposure_total_tgt = (long_exposure_from_cpsamt_mn_tgt
-                                   + long_exposure_from_oacct_tgt
-                                   + long_exposure_from_facct_tgt)
+        # long_exposure_total_tgt = (long_exposure_from_cpsamt_mn_tgt
+        #                            + long_exposure_from_oacct_tgt
+        #                            + long_exposure_from_facct_tgt)
 
-        short_exposure_from_facct_tgt = (long_exposure_total_tgt
-                                         - short_exposure_from_macct_tgt
-                                         - short_exposure_from_oacct_tgt)
-        int_lots_index_future_short_tgt = self.cmp_f_lots('MN', short_exposure_from_facct_tgt, ic_if_ih)
-        short_exposure_from_facct_tgt = (
-                int_lots_index_future_short_tgt
-                * self.gv.dict_index_future2multiplier[ic_if_ih]
-                * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
-        )
-        na_facct_tgt = short_exposure_from_facct_tgt * self.gv.flt_facct_internal_required_margin_rate
-
-        na_oacct_tgt = approximate_na_oacct
-
-        short_exposure_tgt = (short_exposure_from_facct_tgt
-                              + short_exposure_from_macct_tgt
-                              + short_exposure_from_oacct_tgt)
-        dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
-        long_exposure_from_etf = dict_bs_by_prdcode['ETFLongAmt']
-        long_exposure_from_etf_tgt = long_exposure_from_etf
-        if self.tgt_items['long_exposure_from_etf']:
-            long_exposure_from_etf_tgt = self.tgt_items['long_exposure_from_etf']
-
-        long_exposure_tgt = short_exposure_tgt
-        long_exposure_from_cpsamt_mn_tgt = (long_exposure_tgt
-                                            - long_exposure_from_oacct_tgt
-                                            - long_exposure_from_facct_tgt
-                                            - long_exposure_from_etf_tgt)
-        na_cmacct_tgt = na_mn_tgt - na_facct_tgt - na_oacct_tgt
-
-        dict_tgt = {
-            'TargetNetAsset': tgt_na,
-            'EI': {
-                'EINetAsset': {
-                    'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
-                    'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
-                    'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
-                    'EINetAsset': ei_na_tgt,
-                    'NetAssetAllocationBetweenCapitalSources': {},
-                },
-                'EIPosition': {
-                    'EICashOfSecurityAccount': ei_cash_in_saccts_tgt,
-                    'EICashEquivalentOfSecurityAccount': ei_ce_in_saccts_tgt,
-                    'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
-                    'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
-                    'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
-                    'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
-                    'EIContractsNetAmountOfFutureAccounts': ei_long_exposure_from_faccts,
-                    'EIContractsNetLotsOfFutureAccounts': ei_int_lots_index_future_tgt,
-                    'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
-                    'PositionAllocationBetweenCapitalSources': {},
-                }
-            },
-            'MN': {
-                'MNNetAsset': {
-                    'MNNetAssetOfStockAccounts': mn_cpsamt_tgt,
-                    'MNNetAssetOfFutureAccounts': None,
-                    'MNNetAssetOfOTCAccounts': None,
-                    'MNNetAsset': None,
-                    'NetAssetAllocationBetweenCapitalSources': {},
-                },
-                'MNPosition': {
-                    'MNCashOfSecurityAccount': None,
-                    'MNCashEquivalentOfSecurityAccount': None,
-                    'MNCompositeLongAmountOfSecurityAccounts': None,
-                    'MNCompositeShortAmountOfSecurityAccounts': None,
-                    'MNETFNetAmountOfSecurityAccounts': None,
-                    'MNContractsNetAmountOfFutureAccounts': None,
-                    'MNContractsNetLotsOfFutureAccounts': None,
-                    'MNNetExposureFromOTCAccounts': None,
-                    'PositionAllocationBetweenCapitalSources': {},
-                }
-            },
-        }
+        # short_exposure_from_facct_tgt = (long_exposure_total_tgt
+        #                                  - short_exposure_from_macct_tgt
+        #                                  - short_exposure_from_oacct_tgt)
+        # int_lots_index_future_short_tgt = self.cmp_f_lots('MN', short_exposure_from_facct_tgt, ic_if_ih)
+        # short_exposure_from_facct_tgt = (
+        #         int_lots_index_future_short_tgt
+        #         * self.gv.dict_index_future2multiplier[ic_if_ih]
+        #         * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
+        # )
+        # na_facct_tgt = short_exposure_from_facct_tgt * self.gv.flt_facct_internal_required_margin_rate
+        #
+        # na_oacct_tgt = approximate_na_oacct
+        #
+        # short_exposure_tgt = (short_exposure_from_facct_tgt
+        #                       + short_exposure_from_macct_tgt
+        #                       + short_exposure_from_oacct_tgt)
+        # dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+        # long_exposure_from_etf = dict_bs_by_prdcode['ETFLongAmt']
+        # long_exposure_from_etf_tgt = long_exposure_from_etf
+        # if self.tgt_items['long_exposure_from_etf']:
+        #     long_exposure_from_etf_tgt = self.tgt_items['long_exposure_from_etf']
+        #
+        # long_exposure_tgt = short_exposure_tgt
+        # long_exposure_from_cpsamt_mn_tgt = (long_exposure_tgt
+        #                                     - long_exposure_from_oacct_tgt
+        #                                     - long_exposure_from_facct_tgt
+        #                                     - long_exposure_from_etf_tgt)
+        # na_cmacct_tgt = na_mn_tgt - na_facct_tgt - na_oacct_tgt
+        #
+        # dict_tgt = {
+        #     'TargetNetAsset': tgt_na,
+        #     'EI': {
+        #         'EINetAsset': {
+        #             'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
+        #             'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
+        #             'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
+        #             'EINetAsset': ei_na_tgt,
+        #             'NetAssetAllocationBetweenCapitalSources': {},
+        #         },
+        #         'EIPosition': {
+        #             'EICashOfSecurityAccount': ei_cash_in_saccts_tgt,
+        #             'EICashEquivalentOfSecurityAccount': ei_ce_in_saccts_tgt,
+        #             'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
+        #             'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
+        #             'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
+        #             'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
+        #             'EIContractsNetAmountOfFutureAccounts': ei_long_exposure_from_faccts,
+        #             'EIContractsNetLotsOfFutureAccounts': ei_int_lots_index_future_tgt,
+        #             'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
+        #             'PositionAllocationBetweenCapitalSources': {},
+        #         }
+        #     },
+        #     'MN': {
+        #         'MNNetAsset': {
+        #             'MNNetAssetOfStockAccounts': mn_cpsamt_tgt,
+        #             'MNNetAssetOfFutureAccounts': None,
+        #             'MNNetAssetOfOTCAccounts': None,
+        #             'MNNetAsset': None,
+        #             'NetAssetAllocationBetweenCapitalSources': {},
+        #         },
+        #         'MNPosition': {
+        #             'MNCashOfSecurityAccount': None,
+        #             'MNCashEquivalentOfSecurityAccount': None,
+        #             'MNCompositeLongAmountOfSecurityAccounts': None,
+        #             'MNCompositeShortAmountOfSecurityAccounts': None,
+        #             'MNETFNetAmountOfSecurityAccounts': None,
+        #             'MNContractsNetAmountOfFutureAccounts': None,
+        #             'MNContractsNetLotsOfFutureAccounts': None,
+        #             'MNNetExposureFromOTCAccounts': None,
+        #             'PositionAllocationBetweenCapitalSources': {},
+        #         }
+        #     },
+        # }
 
 
 class Account(Product):
@@ -414,15 +416,15 @@ class Account(Product):
                                   .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
         approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
         dif_margin_required_in_perfect_shape_approximate_na = approximate_na - margin_required_in_perfect_shape
-        print(self.acctidbymxz, dif_margin_required_in_perfect_shape_approximate_na)
         if dif_margin_required_in_perfect_shape_approximate_na < 0:
             dict_item_2b_adjusted = {
-                self.acctidbymxz: {
+                    'DataDate': self.str_today,
+                    'PrdCode': self.prdcode,
+                    'AcctIDByMXZ': self.acctidbymxz,
                     'ApproximateNetAsset': approximate_na,
-                    'NetAssetInPerfectShape': margin_rate_in_perfect_shape,
+                    'NetAssetInPerfectShape': margin_required_in_perfect_shape,
                     'NetAssetDif2Perfect': dif_margin_required_in_perfect_shape_approximate_na
                 }
-            }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
     def check_cash_in_c_m_acct(self):
@@ -436,13 +438,14 @@ class Account(Product):
         dif_cash = cash - cash_in_perfect_shape
         if abs(dif_cash) > 2000000:
             dict_item_2b_adjusted = {
-                self.acctidbymxz: {
+                    'DataDate': self.str_today,
+                    'PrdCode': self.prdcode,
+                    'AcctIDByMXZ': self.acctidbymxz,
                     'Cash': cash,
                     'CashInPerfectShape': cash_in_perfect_shape,
                     'CashDif2Perfect': dif_cash,
                     'CE': ce
                 }
-            }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
 
@@ -455,7 +458,9 @@ class MainFrameWork:
         for prdcode in self.list_prdcodes:
             prd = Product(self.gv, prdcode)
             prd.check_exception()
-        print(self.gv.list_items_2b_adjusted)
+            prd.check_exposure()
+        self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
+        self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
 
 
 if __name__ == '__main__':
