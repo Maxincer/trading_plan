@@ -8,13 +8,24 @@
 思路：
     1. 将每个账户抽象为类
     2. 将每个产品抽象为类
-Note:
+重要假设:
     1. ETF: exchange traded fund: 交易所交易基金，不存在场外ETF。 重要假设
+    2.
 Abbr.:
     1. cps: composite
     2. MN: Market Neutral
     3. EI: Enhanced Index
     4. cpspct: composite percentage: composite amt / net asset value
+todo:
+    1. 期货户持仓变动时，需要试算可用保证金是否充足
+        1. 期货户持仓变动触发： balance exposure
+    2. 国债逆回购（核新系统）不在下载的数据文件之内，如何添加？
+    3. 国债逆回购不同系统的单位价格确认。（核新为1000，有没有100的情况？）
+    4. 申赎款
+    5. 分渠道的资金分配
+Memo:
+    1. 1203 的个券融券开仓时间为20200623
+
 """
 from datetime import datetime
 from math import ceil, floor
@@ -195,9 +206,16 @@ class Product:
                                + ei_etfshortamt_tgt)
 
         # 2. MN策略budget
-        # 1. 分配MN策略涉及的账户资产
+        # todo 有两种模式：1. 指定composite long amt 仓位模式 2. composite long amt 最大值模式
+        # todo 先写指定仓位模式
+        # 指定仓位模式（根据self.tgt_cpspct确定cpsamt金额）：
+        # 2.1 分配MN策略涉及的账户资产
         mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
         mn_cpsamt_tgt = mn_na_tgt * self.tgt_cpspct
+
+
+
+
 
         # 求信用户提供的空头暴露预算值
         # 一个基金产品只能开立一个信用账户

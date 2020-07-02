@@ -176,7 +176,7 @@ class DBTradingData:
                     list_values = list_datalines[1].decode('gbk').split()
                     dict_rec_capital.update(dict(zip(list_keys, list_values)))
 
-            elif data_source_type in ['swhy_alphabee_dbf2csv']:
+            elif data_source_type in ['swhy_alphabee_dbf2csv', 'ax_custom']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].decode('gbk').split(',')
@@ -257,7 +257,7 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-            elif data_source_type in ['swhy_alphabee_dbf2csv'] and accttype in ['c', 'm']:
+            elif data_source_type in ['swhy_alphabee_dbf2csv', 'ax_custom'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[3].decode('gbk').split(',')
