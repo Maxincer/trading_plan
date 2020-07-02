@@ -908,6 +908,9 @@ class DBTradingData:
                             underlying_net_exposure += underlying_net_exposure_delta
                         list_dicts_holding_patchdata_fmtted.append(dict_holding_patchdata)
                 list_dicts_holding_fmtted_patched = list_dicts_holding_fmtted + list_dicts_holding_patchdata_fmtted
+                for dict_holding_fmtted_patched in list_dicts_holding_fmtted_patched:
+                    prdcode = dict_holding_fmtted_patched['AcctIDByMXZ'].split('_')[0]
+                    dict_holding_fmtted_patched['PrdCode'] = prdcode
                 self.db_trddata['formatted_holding'].delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                 if list_dicts_holding_fmtted_patched:
                     self.db_trddata['formatted_holding'].insert_many(list_dicts_holding_fmtted_patched)

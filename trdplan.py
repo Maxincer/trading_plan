@@ -61,6 +61,7 @@ class GlobalVariable:
         self.dict_index_future2multiplier = {'IC': 200, 'IF': 300, 'IH': 300}
         self.dict_index_future2spot = {'IC': '000905.SH', 'IF': '000300.SH', 'IH': '000016.SH'}
         self.flt_facct_internal_required_margin_rate = 0.2
+        self.col_formatted_holding = self.db_trddata['formatted_holding']
 
         w.start()
         set_ic_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014872000000").Data[1])
@@ -93,7 +94,7 @@ class Product:
             self.dict_strategies_allocation = None
         self.dict_na_allocation = self.dict_prdinfo['NetAssetAllocation']
         self.tgt_cpspct = self.dict_prdinfo['TargetCompositePercentage']
-        self.tgt_items = self.dict_prdinfo['TargetItems']
+        self.dict_tgt_items = self.dict_prdinfo['TargetItems']
         self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
         self.prd_short_exposure = dict_exposure_analysis_by_prdcode['ShortExposure']
         self.prd_net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
@@ -174,8 +175,8 @@ class Product:
 
         # 算法部分
         tgt_na = self.prd_approximate_na
-        if self.tgt_items['net_asset']:
-            tgt_na = self.tgt_items['net_asset']
+        if self.dict_tgt_items['NetAsset']:
+            tgt_na = self.dict_tgt_items['NetAsset']
 
         # 1. EI策略budget
         ei_na_tgt = tgt_na * self.dict_strategies_allocation['EI']
@@ -211,30 +212,38 @@ class Product:
         # 指定仓位模式（根据self.tgt_cpspct确定cpsamt金额）：
         # 2.1 分配MN策略涉及的账户资产
         mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
-        mn_cpsamt_tgt = mn_na_tgt * self.tgt_cpspct
-
-
-
-
+        mn_cpslongamt_tgt = mn_na_tgt * self.tgt_cpspct
 
         # 求信用户提供的空头暴露预算值
         # 一个基金产品只能开立一个信用账户
+        # 假设：信用户提供的空头暴露工具只有 etf 和 cps(个股)
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
         )
-        mn_short_exposure_from_macct = 0
+        mn_etfshortamt_in_macct = 0
+        mn_cpsshortamt_in_macct = 0
         if dict_macct_basicinfo:
             acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
-            dict_bs_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
+            list_dicts_formatted_holding = self.gv.col_formatted_holding.find(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
             )
-            mn_cpsshortamt_macct = dict_bs_by_acctidbymxz['CompositeShortAmt']
-            mn_etfshortamt_macct = dict_bs_by_acctidbymxz['ETFShortAmt']
+            for dict_formatted_holding in list_dicts_formatted_holding:
+                sectype = dict_formatted_holding['SecurityType']
+                if sectype in ['ETF']:
+                    mn_etfshortamt_in_macct_delta = dict_formatted_holding['ShortAmt']
+                    mn_etfshortamt_in_macct += mn_etfshortamt_in_macct_delta
+                elif sectype in ['CS']:
+                    mn_cpsshortamt_in_macct_delta = dict_formatted_holding['ShortAmt']
+                    mn_cpsshortamt_in_macct += mn_cpsshortamt_in_macct_delta
+                else:
+                    ValueError('Unknown security type when computing mn_etfshortamt_macct '
+                               'and mn_cpsshortamt_in_macct')
+        if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
+            mn_etfshortamt_in_macct = self.dict_tgt_items['ETFShortAmountInMarginAccount']
+        if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
+            mn_cpsshortamt_in_macct = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
 
-
-        mn_short_exposure_from_macct_tgt = mn_short_exposure_from_macct
-        if self.tgt_items['short_exposure_from_macct']:
-            mn_short_exposure_from_macct_tgt = self.tgt_items['short_exposure_from_macct']
+        mn_short_exposure_from_macct = mn_etfshortamt_in_macct + mn_cpsshortamt_in_macct  # 假设 空头（信用）仅由两部分组成。
 
         # 求场外户和自定义账户提供的空头暴露预算值与多头暴露预算值
         # 求场外户和自定义账户中的存出保证金（net_asset）
@@ -261,11 +270,11 @@ class Product:
                 approximate_na_oacct += approximate_na_oacct_delta
 
         short_exposure_from_oacct_tgt = short_exposure_from_oacct
-        if self.tgt_items['short_exposure_from_oacct']:
-            short_exposure_from_oacct_tgt = self.tgt_items['short_exposure_from_oacct']
+        if self.dict_tgt_items['short_exposure_from_oacct']:
+            short_exposure_from_oacct_tgt = self.dict_tgt_items['short_exposure_from_oacct']
         long_exposure_from_oacct_tgt = long_exposure_from_oacct
-        if self.tgt_items['long_exposure_from_oacct']:
-            long_exposure_from_oacct_tgt = self.tgt_items['long_exposure_from_oacct']
+        if self.dict_tgt_items['long_exposure_from_oacct']:
+            long_exposure_from_oacct_tgt = self.dict_tgt_items['long_exposure_from_oacct']
 
         # 求期货户提供的多空暴露预算值
         # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
@@ -285,8 +294,8 @@ class Product:
             short_exposure_from_facct += short_exposure_from_facct_delta
 
         long_exposure_from_facct_tgt = long_exposure_from_facct
-        if self.tgt_items['long_exposure_from_facct']:
-            long_exposure_from_facct_tgt = self.tgt_items['long_exposure_from_facct']
+        if self.dict_tgt_items['long_exposure_from_facct']:
+            long_exposure_from_facct_tgt = self.dict_tgt_items['long_exposure_from_facct']
 
         # long_exposure_total_tgt = (long_exposure_from_cpsamt_mn_tgt
         #                            + long_exposure_from_oacct_tgt
@@ -311,8 +320,8 @@ class Product:
         # dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         # long_exposure_from_etf = dict_bs_by_prdcode['ETFLongAmt']
         # long_exposure_from_etf_tgt = long_exposure_from_etf
-        # if self.tgt_items['long_exposure_from_etf']:
-        #     long_exposure_from_etf_tgt = self.tgt_items['long_exposure_from_etf']
+        # if self.dict_tgt_items['long_exposure_from_etf']:
+        #     long_exposure_from_etf_tgt = self.dict_tgt_items['long_exposure_from_etf']
         #
         # long_exposure_tgt = short_exposure_tgt
         # long_exposure_from_cpsamt_mn_tgt = (long_exposure_tgt

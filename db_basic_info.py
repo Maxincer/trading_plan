@@ -43,12 +43,14 @@ class DatabaseBasicInfo:
                 dict_to_be_inserted['NetAssetAllocation'] = dict_na_allocation
             if dict_to_be_inserted['TargetItems']:
                 dict_tgtitems = json.loads(dict_to_be_inserted['TargetItems'].replace("'", '"'))
-                if 'short_exposure_from_macct' not in dict_tgtitems:
-                    dict_tgtitems['short_exposure_from_macct'] = None
-                if 'short_exposure_from_oacct' not in dict_tgtitems:
-                    dict_tgtitems['short_exposure_from_oacct'] = None
-                if 'net_asset' not in dict_tgtitems:
-                    dict_tgtitems['net_asset'] = None
+                if 'ETFShortAmountInMarginAccount' not in dict_tgtitems:
+                    dict_tgtitems['ETFShortAmountInMarginAccount'] = None
+                if 'CompositeShortAmountInMarginAccount' not in dict_tgtitems:
+                    dict_tgtitems['CompositeShortAmountInMarginAccount'] = None
+                if 'ShortExposureFromOTCAccount' not in dict_tgtitems:
+                    dict_tgtitems['ShortExposureFromOTCAccount'] = None
+                if 'NetAsset' not in dict_tgtitems:
+                    dict_tgtitems['NetAsset'] = None
                 dict_to_be_inserted['TargetItems'] = dict_tgtitems
         self.col_prdinfo.delete_many({'DataDate': self.str_today})
         self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
