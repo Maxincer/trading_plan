@@ -152,6 +152,7 @@ class Product:
         1. 有target用target覆盖，无target就用现值
         2. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
         3. 重要： EI策略中不使用ETF来补充beta
+        4. 重要： 期指对冲策略中，只使用IC进行对冲
         Note:
             1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配
         思路：
@@ -186,15 +187,15 @@ class Product:
                                            + ei_etflongamt_tgt
                                            - ei_cpsshortamt_tgt
                                            - ei_etfshortamt_tgt))
-        ei_int_lots_index_future_tgt = self.cmp_f_lots('EI', ei_long_exposure_from_faccts, ic_if_ih)
-        ei_long_exposure_from_faccts_tgt = (
-                ei_int_lots_index_future_tgt
+        ei_int_net_lots_index_future_tgt = self.cmp_f_lots('EI', ei_long_exposure_from_faccts, ic_if_ih)
+        ei_netamt_faccts_tgt = (
+                ei_int_net_lots_index_future_tgt
                 * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
                 * self.gv.dict_index_future2multiplier[ic_if_ih]
         )
-        ei_na_faccts_tgt = ei_long_exposure_from_faccts_tgt * flt_ei_internal_required_margin_rate
+        ei_na_faccts_tgt = ei_netamt_faccts_tgt * flt_ei_internal_required_margin_rate
         ei_cpslongamt_tgt = (ei_na_tgt
-                             - ei_long_exposure_from_faccts_tgt
+                             - ei_netamt_faccts_tgt
                              + ei_cpsshortamt_tgt
                              + ei_etfshortamt_tgt
                              - ei_etflongamt_tgt)
@@ -245,55 +246,76 @@ class Product:
 
         mn_short_exposure_from_macct = mn_etfshortamt_in_macct + mn_cpsshortamt_in_macct  # 假设 空头（信用）仅由两部分组成。
 
-        # 求场外户和自定义账户提供的空头暴露预算值与多头暴露预算值
-        # 求场外户和自定义账户中的存出保证金（net_asset）
+        # 求oacct提供的空头暴露预算值与多头暴露预算值
+        # 求oacct账户中的存出保证金（net_asset）
+        # 根据实际业务做出假设：1. oacct全部用于MN策略 2.oacct仅提供short exposure
+        # todo oacct中出现多头暴露时需要改进
         list_dicts_oacct_basicinfo = list(
             self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o'})
         )
-        short_exposure_from_oacct = 0
-        long_exposure_from_oacct = 0
-        approximate_na_oacct = 0
+        mn_short_exposure_from_oacct = 0  # 假设oacct的账户全部且仅为MN服务
+        mn_approximate_na_oacct = 0  # 假设oacct的账户全部且仅为MN服务
         for dict_oacct_basicinfo in list_dicts_oacct_basicinfo:
             if dict_oacct_basicinfo:
                 acctidbymxz_oacct = dict_oacct_basicinfo['AcctIDByMXZ']
                 dict_exposure_analysis_by_acctidbymxz = self.gv.col_acctinfo.find_one(
                     {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
                 )
-                short_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
-                short_exposure_from_oacct += short_exposure_from_oacct_delta
-                long_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['LongExposure']
-                long_exposure_from_oacct += long_exposure_from_oacct_delta
+                mn_short_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
+                mn_short_exposure_from_oacct += mn_short_exposure_from_oacct_delta
                 dict_bs_by_acctidbymxz = self.gv.col_acctinfo.find_one(
                     {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
                 )
-                approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
-                approximate_na_oacct += approximate_na_oacct_delta
+                mn_approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+                mn_approximate_na_oacct += mn_approximate_na_oacct_delta
 
-        short_exposure_from_oacct_tgt = short_exposure_from_oacct
-        if self.dict_tgt_items['short_exposure_from_oacct']:
-            short_exposure_from_oacct_tgt = self.dict_tgt_items['short_exposure_from_oacct']
-        long_exposure_from_oacct_tgt = long_exposure_from_oacct
-        if self.dict_tgt_items['long_exposure_from_oacct']:
-            long_exposure_from_oacct_tgt = self.dict_tgt_items['long_exposure_from_oacct']
+        mn_short_exposure_from_oacct_tgt = mn_short_exposure_from_oacct
+        if self.dict_tgt_items['ShortExposureFromOTCAccount']:
+            mn_short_exposure_from_oacct_tgt = self.dict_tgt_items['ShortExposureFromOTCAccount']
 
         # 求期货户提供的多空暴露预算值
         # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
+        # 价格为对应的现货指数价格
         list_dicts_faccts_basicinfo = list(
             self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'f'})
         )
-        long_exposure_from_facct = 0
-        short_exposure_from_facct = 0
+        netamt_index_future_in_faccts = 0  # 注意 此处是faccts,（非facct）, 是所有facct的合计
         for dict_facct_basicinfo in list_dicts_faccts_basicinfo:
             acctidbymxz_facct = dict_facct_basicinfo['AcctIDByMXZ']
             dict_exposure_analysis_by_acctidbymxz = self.gv.col_acctinfo.find_one(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_facct}
             )
-            long_exposure_from_facct_delta = dict_exposure_analysis_by_acctidbymxz['LongExposure']
-            long_exposure_from_facct += long_exposure_from_facct_delta
-            short_exposure_from_facct_delta = dict_exposure_analysis_by_acctidbymxz['ShortExposure']
-            short_exposure_from_facct += short_exposure_from_facct_delta
 
-        long_exposure_from_facct_tgt = long_exposure_from_facct
+            # 按照exposure amount 排除ei的部分
+            list_dicts_future_api_holding = self.gv.col_future_api_holding.find(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_facct}
+            )
+
+            longamt_index_future_in_facct = 0
+            shortamt_index_future_in_facct = 0
+            for dict_future_api_holding in list_dicts_future_api_holding:
+                lots_position = dict_future_api_holding['position']
+                direction = dict_future_api_holding['direction']
+                instrument_id_first_2 = dict_future_api_holding['instrument_id'][:2]
+                if instrument_id_first_2 in ['IC', 'IF', 'IH']:
+                    close = self.gv.dict_index_future_windcode2close[
+                        self.gv.dict_index_future2spot[instrument_id_first_2]
+                    ]
+                    multiplier = self.gv.dict_index_future2multiplier[instrument_id_first_2]
+                    if direction == 'long':
+                        longamt_index_future_in_facct_delta = lots_position * close * multiplier
+                        longamt_index_future_in_facct += longamt_index_future_in_facct_delta
+                    elif direction == 'short':
+                        shortamt_index_future_in_facct_delta = lots_position * close * multiplier
+                        shortamt_index_future_in_facct += shortamt_index_future_in_facct_delta
+                    else:
+                        raise ValueError('Unknown instrument_id_first_2 when computing amt in facct.')
+            netamt_index_future_in_facct_delta = longamt_index_future_in_facct - shortamt_index_future_in_facct
+            netamt_index_future_in_faccts += netamt_index_future_in_facct_delta
+
+        mn_netamt_index_future_in_faccts = netamt_index_future_in_faccts - ei_netamt_faccts_tgt
+
+        long_exposure_from_facct_tgt = mn_long_exposure_from_facct
         if self.dict_tgt_items['long_exposure_from_facct']:
             long_exposure_from_facct_tgt = self.dict_tgt_items['long_exposure_from_facct']
 
