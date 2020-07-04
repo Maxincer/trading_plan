@@ -6,11 +6,67 @@
 
 """
 思路：
-    1. 将每个账户抽象为类
-    2. 将每个产品抽象为类
+
 重要假设:
-    1. ETF: exchange traded fund: 交易所交易基金，不存在场外ETF。 重要假设
+    1. ETF: exchange traded fund: 交易所交易基金。不存在场外ETF。
     2.
+
+合规假设：
+    1. 融资融券业务相关：
+        1. 证监会《融资融券合同必备条款》第五条第一款，甲方用于一家证券交易所上市证券交易的信用证券账户只能有一个。
+            （证券公司客户信用交易担保证券账户）
+        2. 证监会《融资融券合同必备条款》第五条第二款，甲方用于一家证券交易所上市证券交易的信用资金账户只能有一个。
+            （证券公司客户信用交易担保资金账户）
+        3. 证监会《融资融券合同必备条款》第八条第一款，融资、融券期限从甲方实际使用资金或使用证券之日起计算。
+        4. 证监会《融资融券合同必备条款》第八条第二款，融资利息和融券费用按照甲方实际使用资金和证券的天数计算。
+        5. 证件会《融资融券合同必备条款》第十二条第三款，甲方卖出信用证券账户中融资买入尚未了结合约的证券所得价款，应当先偿还甲方融资欠款。
+        6. 证件会《融资融券合同必备条款》第十四条第三款，合同应约定：甲方融入证券后、归还证券前，证券发行人分配投资收益、向证券持有人配售或者
+           无偿派发证券、发行证券持有人有优先认购权的证券的，甲方在偿还债务时，应当按照合同约定，向乙方支付与所融入证券可得利益相等的证券或资金。
+           合同还应明确约定甲方对乙方进行补偿的具体方式以及数量、金额的计算方法。约定的补偿方式以及数量、金额的计算方法应公平合理。
+        7. 证件会《融资融券合同必备条款》第十五条第三款，乙方向甲方提供对账服务的方式，如网站或电话交易系统查询、发送电子邮件查询、
+            邮寄对账单查询等。乙方向甲方提供的对账单，应载明如下事项：
+    　 　      1、甲方授信额度与剩余可用授信额度；
+    　　       2、甲方信用账户资产总值、负债总额、保证金可用余额与可提取金额、担保证券市值、维持担保比例；
+    　　       3、每笔融资利息与融券费用、偿还期限，融资买入和融券卖出的成交价格、数量、金额。
+        8. 《上海证券交易所融资融券交易实施细则》第四十二条，维持担保比例是指客户担保物价值与其融资融券债务之间的比例，计算公式为：
+            维持担保比例=（现金+信用证券账户内证券市值总和+其他担保物价值）/（融资买入金额+融券卖出证券数量×当前市价＋利息及费用总和）。
+            注：新修订的“细则”（2019年修订）取消了最低维持担保比例不得低于130%的规定。原为130% 补至160%
+        9. 《上海证券交易所融资融券交易实施细则》第四十条，投资者融资买入或融券卖出时所使用的保证金不得超过其保证金可用余额。
+            保证金可用余额是指投资者用于充抵保证金的现金、证券市值及融资融券交易产生的浮盈经折算后形成的保证金总额，减去投资者未了结融资融券交易
+            已占用保证金和相关利息、费用的余额。其计算公式为：
+            保证金可用余额 ＝ 现金
+                           + ∑（可充抵保证金的证券市值×折算率）
+
+                           + ∑［（融资买入证券市值－融资买入金额）×折算率］
+                           + ∑［（融券卖出金额－融券卖出证券市值）×折算率］
+
+                           - ∑融券卖出金额
+
+                           - ∑融资买入证券金额×融资保证金比例
+                           - ∑融券卖出证券市值×融券保证金比例
+                           - 利息及费用
+            公式中，
+            融券卖出金额 = 融券卖出证券的数量×卖出价格，
+            融券卖出证券市值=融券卖出证券数量×市价，
+            融券卖出证券数量指融券卖出后尚未偿还的证券数量；
+            ∑［（融资买入证券市值－融资买入金额）×折算率］、∑［（融券卖出金额－融券卖出证券市值）×折算率］中的折算率是指融资买入、
+            融券卖出证券对应的折算率，当融资买入证券市值低于融资买入金额或融券卖出证券市值高于融券卖出金额时，折算率按100%计算。
+        10. 《上海证券交易所融资融券交易实施细则》第三十八条，投资者融资买入证券时，融资保证金比例不得低于100%。
+　　          融资保证金比例是指投资者融资买入时交付的保证金与融资交易金额的比例，计算公式为：
+             融资保证金比例 = 保证金 / (融资买入证券数量 * 买入价格) * 100%
+        11. 《上海证券交易所融资融券交易实施细则》第三十九条,投资者融券卖出时，融券保证金比例不得低于50%。
+            融券保证金比例是指投资者融券卖出时交付的保证金与融券交易金额的比例，计算公式为：
+            融券保证金比例 = 保证金 / (融券卖出证券数量 * 卖出价格) * 100%
+        12. 《上海证券交易所融资融券交易实施细则》第十七条，未了结相关融券交易前，投资者融券卖出所得价款除以下用途外，不得另作他用：
+            （一）买券还券；
+            （二）偿还融资融券相关利息、费用和融券交易相关权益现金补偿；
+            （三）买入或申购证券公司现金管理产品、货币市场基金以及本所认可的其他高流动性证券；
+            （四）证监会及本所规定的其他用途。
+        13. 《上海证券交易所融资融券交易实施细则》第五条，会员在本所从事融资融券交易，应按照有关规定开立
+            融券专用证券账户、客户信用交易担保证券账户、 融资专用资金账户及客户信用交易担保资金账户，并在开户后3个交易日内报本所备案。
+            《上海证券交易所融资融券交易实施细则》第七条，会员在向客户融资、融券前，应当按照有关规定与客户签订融资融券合同及融资融券交易风险揭示
+            书，并为其开立信用证券账户和信用资金账户。
+
 Abbr.:
     1. cps: composite
     2. MN: Market Neutral
@@ -26,6 +82,13 @@ todo:
 Memo:
     1. 1203 的个券融券开仓时间为20200623
 
+Naming Convention:
+    1. Security Accounts:
+        1. 根据《上海证券交易所融资融券交易实施细则》，margin account 的官方翻译为：“信用证券账户”。
+        2. 根据证件会《融资融券合同必备条款》，cash account 的官方翻译为：“普通证券账户”
+        3. 综合上述两点，证券账户包括信用证券账户与普通证券账户，英文在本项目中约定为Security Account.
+        4. Accounts 为 Account的复数形式，表示全部Account的意思。
+        5. 根据《上海证券交易所融资融券交易实施细则》，“证券类资产”，是指投资者持有的客户交易结算资金、股票、债券、基金、证券公司资管计划等资产。
 """
 from datetime import datetime
 from math import ceil, floor
@@ -153,8 +216,10 @@ class Product:
         2. 空头暴露分配优先级（从高到低）：融券ETF，场外收益互换，股指期货
         3. 重要： EI策略中不使用ETF来补充beta
         4. 重要： 期指对冲策略中，只使用IC进行对冲
+        5. 重要： 最多两个策略且由这两个策略构成： EI， MN
         Note:
-            1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配
+            1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配。
+            2. 本函数未对SecurityAccounts中的 cash account 及 margin account 进行区分。
         思路：
             1. 先求EI的shape，剩下的都是MN的。
         todo 数据库中的仓位比例为cpslongamt的比例
@@ -170,9 +235,6 @@ class Product:
         ei_cpsshortamt_tgt = 0
         ei_etflongamt_tgt = 0
         ei_etfshortamt_tgt = 0
-
-        # MN 策略预算假设
-        flt_mn_cash2cpsamt = 0.987
 
         # 算法部分
         tgt_na = self.prd_approximate_na
@@ -210,13 +272,24 @@ class Product:
         # 2. MN策略budget
         # todo 有两种模式：1. 指定composite long amt 仓位模式 2. composite long amt 最大值模式
         # todo 先写指定仓位模式
+        # todo 换仓资金比例假设：采用定值模式中，EI策略与MN策略换仓资金比例最小值，EI: 0.0888，MN：0.0987，即留出0.889的换仓资金即可。
+        # todo 20200704需要分析两融户中换仓资金的准确算法， 即 保证金制度交易下的详细算法（大课题）。
+        # todo 假设目前普通户与两融户无分配比例要求。
+
         # 指定仓位模式（根据self.tgt_cpspct确定cpsamt金额）：
+
+        # MN 策略预算假设
+        flt_mn_cash2cpslongamt = 0.888
+
         # 2.1 分配MN策略涉及的账户资产
         mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
         mn_cpslongamt_tgt = mn_na_tgt * self.tgt_cpspct
+        mn_cash_from_na_in_saccts_tgt = mn_cpslongamt_tgt * flt_mn_cash2cpslongamt
+        mn_cash_from_shortselling_in_saccts_tgt = 0
+        mn_cash_from_cash_loan = 0
 
         # 求信用户提供的空头暴露预算值
-        # 一个基金产品只能开立一个信用账户
+        # 合规：一个基金产品只能开立一个信用账户
         # 假设：信用户提供的空头暴露工具只有 etf 和 cps(个股)
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
@@ -239,12 +312,12 @@ class Product:
                 else:
                     ValueError('Unknown security type when computing mn_etfshortamt_macct '
                                'and mn_cpsshortamt_in_macct')
+        mn_etfshortamt_in_macct_tgt = mn_etfshortamt_in_macct
+        mn_cpsshortamt_in_macct_tgt = mn_cpsshortamt_in_macct
         if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
-            mn_etfshortamt_in_macct = self.dict_tgt_items['ETFShortAmountInMarginAccount']
+            mn_etfshortamt_in_macct_tgt = self.dict_tgt_items['ETFShortAmountInMarginAccount']
         if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
-            mn_cpsshortamt_in_macct = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
-
-        mn_short_exposure_from_macct = mn_etfshortamt_in_macct + mn_cpsshortamt_in_macct  # 假设 空头（信用）仅由两部分组成。
+            mn_cpsshortamt_in_macct_tgt = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
 
         # 求oacct提供的空头暴露预算值与多头暴露预算值
         # 求oacct账户中的存出保证金（net_asset）
@@ -273,6 +346,16 @@ class Product:
         if self.dict_tgt_items['ShortExposureFromOTCAccount']:
             mn_short_exposure_from_oacct_tgt = self.dict_tgt_items['ShortExposureFromOTCAccount']
 
+        mn_netamt_index_future_in_faccts_tgt = (mn_cpslongamt_tgt
+                                                - mn_etfshortamt_in_macct_tgt
+                                                - mn_cpsshortamt_in_macct_tgt
+                                                - mn_short_exposure_from_oacct_tgt)
+        # todo 假设: 指定IC为唯一对冲工具
+        mn_int_net_lots_index_future_tgt = self.cmp_f_lots('MN', ei_long_exposure_from_faccts, ic_if_ih)
+        mn_na_faccts_tgt = (mn_int_net_lots_index_future_tgt
+                            * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
+                            * self.gv.dict_index_future2multiplier[ic_if_ih])
+
         # 求期货户提供的多空暴露预算值
         # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
         # 价格为对应的现货指数价格
@@ -282,10 +365,6 @@ class Product:
         netamt_index_future_in_faccts = 0  # 注意 此处是faccts,（非facct）, 是所有facct的合计
         for dict_facct_basicinfo in list_dicts_faccts_basicinfo:
             acctidbymxz_facct = dict_facct_basicinfo['AcctIDByMXZ']
-            dict_exposure_analysis_by_acctidbymxz = self.gv.col_acctinfo.find_one(
-                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_facct}
-            )
-
             # 按照exposure amount 排除ei的部分
             list_dicts_future_api_holding = self.gv.col_future_api_holding.find(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_facct}
@@ -315,14 +394,11 @@ class Product:
 
         mn_netamt_index_future_in_faccts = netamt_index_future_in_faccts - ei_netamt_faccts_tgt
 
-        long_exposure_from_facct_tgt = mn_long_exposure_from_facct
-        if self.dict_tgt_items['long_exposure_from_facct']:
-            long_exposure_from_facct_tgt = self.dict_tgt_items['long_exposure_from_facct']
 
         # long_exposure_total_tgt = (long_exposure_from_cpsamt_mn_tgt
         #                            + long_exposure_from_oacct_tgt
         #                            + long_exposure_from_facct_tgt)
-
+        #
         # short_exposure_from_facct_tgt = (long_exposure_total_tgt
         #                                  - short_exposure_from_macct_tgt
         #                                  - short_exposure_from_oacct_tgt)
@@ -351,51 +427,51 @@ class Product:
         #                                     - long_exposure_from_facct_tgt
         #                                     - long_exposure_from_etf_tgt)
         # na_cmacct_tgt = na_mn_tgt - na_facct_tgt - na_oacct_tgt
-        #
-        # dict_tgt = {
-        #     'TargetNetAsset': tgt_na,
-        #     'EI': {
-        #         'EINetAsset': {
-        #             'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
-        #             'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
-        #             'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
-        #             'EINetAsset': ei_na_tgt,
-        #             'NetAssetAllocationBetweenCapitalSources': {},
-        #         },
-        #         'EIPosition': {
-        #             'EICashOfSecurityAccount': ei_cash_in_saccts_tgt,
-        #             'EICashEquivalentOfSecurityAccount': ei_ce_in_saccts_tgt,
-        #             'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
-        #             'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
-        #             'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
-        #             'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
-        #             'EIContractsNetAmountOfFutureAccounts': ei_long_exposure_from_faccts,
-        #             'EIContractsNetLotsOfFutureAccounts': ei_int_lots_index_future_tgt,
-        #             'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
-        #             'PositionAllocationBetweenCapitalSources': {},
-        #         }
-        #     },
-        #     'MN': {
-        #         'MNNetAsset': {
-        #             'MNNetAssetOfStockAccounts': mn_cpsamt_tgt,
-        #             'MNNetAssetOfFutureAccounts': None,
-        #             'MNNetAssetOfOTCAccounts': None,
-        #             'MNNetAsset': None,
-        #             'NetAssetAllocationBetweenCapitalSources': {},
-        #         },
-        #         'MNPosition': {
-        #             'MNCashOfSecurityAccount': None,
-        #             'MNCashEquivalentOfSecurityAccount': None,
-        #             'MNCompositeLongAmountOfSecurityAccounts': None,
-        #             'MNCompositeShortAmountOfSecurityAccounts': None,
-        #             'MNETFNetAmountOfSecurityAccounts': None,
-        #             'MNContractsNetAmountOfFutureAccounts': None,
-        #             'MNContractsNetLotsOfFutureAccounts': None,
-        #             'MNNetExposureFromOTCAccounts': None,
-        #             'PositionAllocationBetweenCapitalSources': {},
-        #         }
-        #     },
-        # }
+
+        dict_tgt = {
+            'TargetNetAsset': tgt_na,
+            'EI': {
+                'EINetAsset': {
+                    'EINetAsset': ei_na_tgt,
+                    'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
+                    'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
+                    'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
+                    'NetAssetAllocationBetweenCapitalSources': {},
+                },
+                'EIPosition': {
+                    'EICashOfSecurityAccounts': ei_cash_in_saccts_tgt,
+                    'EICashEquivalentOfSecurityAccounts': ei_ce_in_saccts_tgt,
+                    'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
+                    'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
+                    'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
+                    'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
+                    'EINetAmountOfFutureAccounts': ei_netamt_faccts_tgt,
+                    'EIContractsNetLotsOfFutureAccounts': ei_int_net_lots_index_future_tgt,
+                    'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
+                    'PositionAllocationBetweenCapitalSources': {},
+                }
+            },
+            'MN': {
+                'MNNetAsset': {
+                    'MNNetAsset': mn_na_tgt,
+                    'MNNetAssetOfSecurityAccounts': None,
+                    'MNNetAssetOfFutureAccounts': None,
+                    'MNNetAssetOfOTCAccounts': None,
+                    'NetAssetAllocationBetweenCapitalSources': {},
+                },
+                'MNPosition': {
+                    'MNCashOfSecurityAccounts': mn_cash_in_saccts_tgt,
+                    'MNCashEquivalentOfSecurityAccounts': mn_ce_in_saccts_tgt,
+                    'MNCompositeLongAmountOfSecurityAccounts': None,
+                    'MNCompositeShortAmountOfSecurityAccounts': None,
+                    'MNETFNetAmountOfSecurityAccounts': None,
+                    'MNContractsNetAmountOfFutureAccounts': None,
+                    'MNContractsNetLotsOfFutureAccounts': None,
+                    'MNNetExposureFromOTCAccounts': None,
+                    'PositionAllocationBetweenCapitalSources': {},
+                }
+            },
+        }
 
 
 class Account(Product):
@@ -421,7 +497,7 @@ class Account(Product):
         # 同一客户在同一会员处的同品种期货合约双向持仓（期货合约进入最后交易日前第五个交易日闭市后除外）
         # 对IC、IH、IF跨品种双向持仓，按照交易保证金单边较大者收取交易保证金
         margin_rate_in_perfect_shape = 0.2
-        margin_rate_warning = 0.15
+        margin_rate_warning = 0.16
         list_dicts_future_api_holding = list(self.gv.col_future_api_holding
                                              .find({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
         margin_required_in_perfect_shape = 0
