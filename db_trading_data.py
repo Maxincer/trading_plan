@@ -20,19 +20,20 @@ Maintained DataBase:
 
 Naming Convention:
     1. 代码中的命名，遵循缩写可作为形容词，与其他名称连拼的规则；
-    2. 数据库中的命名，出于阅读便利考虑， 不可连拼，严格遵循蛇底式拼读法。
+    2. 数据库的命名，出于阅读便利考虑，不可缩写，不可连拼，严格遵循蛇底式拼读法。
     3. the collection should be named as f"{prdcode}_{accttype}_{acctid}_{content}}
         1. content include:
             1. b/s_sheet
             2. holding
             3. trade
             4. transfer serial
+    4. 融券负债：Securities Liability。 Debt 从属于liability 且多为现金义务。
 
 Input:
     0. basic_info.xlsx
     1. downloaded data from trading software.
     2. manually patched data.
-123456
+
 Process:
     循环遍历account basic info, 进行如下处理：
         1. raw data upload.
@@ -51,6 +52,8 @@ Note:
     1. AcctType: cash, margin, future
     2. ColType: capital, holding
 
+Abbr.:
+    1. ss: short selling
 
 """
 
@@ -68,7 +71,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200624'
+        self.str_today = '20200703'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -93,7 +96,7 @@ class DBTradingData:
             dict_rec.update(dict(zip(list_keys, list_values)))
         return dict_rec
 
-    def read_rawdata_from_trdclient(self, fpath, str_c_h_secdebt_mark, data_source_type, accttype):
+    def read_rawdata_from_trdclient(self, fpath, str_c_h_secliability_mark, data_source_type, accttype):
         """
         从客户端下载数据，并进行初步清洗。为字符串格式。
         从客户端下载数据，并进行初步清洗。为字符串格式。
@@ -109,12 +112,12 @@ class DBTradingData:
 
         :param fpath:
         :param accttype: c: cash, m: margin, f: future
-        :param str_c_h_secdebt_mark: ['capital', 'holding', 'secdebt']
+        :param str_c_h_secliability_mark: ['capital', 'holding', 'secliability']
         :param data_source_type:
         :return: list: 由dict rec组成的list
         """
         list_ret = []
-        if str_c_h_secdebt_mark == 'capital':
+        if str_c_h_secliability_mark == 'capital':
             dict_rec_capital = {}
             if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'tf_hx', 'db_hx', 'wk_hx'] and accttype == 'c':
                 with open(fpath, 'rb') as f:
@@ -190,7 +193,7 @@ class DBTradingData:
                 raise ValueError('Field data_source_type not exist in basic info!')
             list_ret.append(dict_rec_capital)
 
-        elif str_c_h_secdebt_mark == 'holding':
+        elif str_c_h_secliability_mark == 'holding':
             if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'zhaos_tdx', 'wk_hx', 'db_hx', 'tf_hx', 'yh_hx',
                                     'xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
@@ -267,24 +270,18 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-        elif str_c_h_secdebt_mark == 'secdebt':
-            """
-            卖均价为成交价格，
-            融券市值为最新价市值，
-            估值表中的负债在卖出后确认，（两融合同必备条款），
-            todo 需确认部分还券时的情况，如何数据处理
-            """
+        elif str_c_h_secliability_mark == 'secliability':
             if data_source_type in ['zhaos_tdx'] and accttype in ['m']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
-                    start_index_secdebt = None
+                    start_index_secliability = None
                     for index, dataline in enumerate(list_datalines):
                         str_dataline = dataline.decode('gbk')
                         if '证券代码' in str_dataline:
-                            start_index_secdebt = index
-                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_secdebt].strip().split()]
+                            start_index_secliability = index
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_secliability].strip().split()]
                     i_list_keys_length = len(list_keys)
-                    for dataline in list_datalines[start_index_secdebt + 1:]:
+                    for dataline in list_datalines[start_index_secliability + 1:]:
                         list_data = dataline.strip().split()
                         if len(list_data) == i_list_keys_length:
                             list_values = [x.decode('gbk') for x in list_data]
@@ -297,7 +294,7 @@ class DBTradingData:
                                 dict_rec_holding['交易市场'] = '沪A'
                             list_ret.append(dict_rec_holding)
         else:
-            raise ValueError('Wrong str_c_h_secdebt_mark input!')
+            raise ValueError('Wrong str_c_h_secliability_mark input!')
         return list_ret
 
     def update_rawdata(self):
@@ -309,7 +306,7 @@ class DBTradingData:
         """
         col_manually_rawdata_capital = self.db_trddata['manually_rawdata_capital']
         col_manually_rawdata_holding = self.db_trddata['manually_rawdata_holding']
-        col_manually_rawdata_secdebt = self.db_trddata['manually_rawdata_secdebt']
+        col_manually_rawdata_secliability = self.db_trddata['manually_rawdata_secliability']
         for _ in self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}, {'_id': 0}):
             datafilepath = _['DataFilePath']
             if datafilepath:
@@ -318,17 +315,17 @@ class DBTradingData:
                 data_source_type = _['DataSourceType']
                 accttype = _['AcctType']
 
-                for ch in ['capital', 'holding', 'secdebt']:
+                for ch in ['capital', 'holding', 'secliability']:
                     if ch == 'capital':
                         fpath_relative = list_fpath_data[0]
                         col_manually_rawdata = col_manually_rawdata_capital
                     elif ch == 'holding':
                         fpath_relative = list_fpath_data[1]
                         col_manually_rawdata = col_manually_rawdata_holding
-                    elif ch == 'secdebt':
+                    elif ch == 'secliability':
                         if len(list_fpath_data) > 2:
                             fpath_relative = list_fpath_data[2]
-                            col_manually_rawdata = col_manually_rawdata_secdebt
+                            col_manually_rawdata = col_manually_rawdata_secliability
                         else:
                             continue
                     else:
@@ -392,7 +389,7 @@ class DBTradingData:
         dict_windcode2mktdata_from_wind = self.df_mktdata_from_wind.set_index('WindCode').to_dict()
         df_datapatch_holding = pd.read_excel(self.fpath_datapatch_relative, sheet_name='holding',
                                              dtype={'AcctIDByMXZ': str, 'SecurityID': str, 'Symbol': str,
-                                                    'LongQty': float, 'ShortQty': float, 'PosCost_vec': float,
+                                                    'LongQty': float, 'ShortQty': float, 'CashFromShortSelling': float,
                                                     'LiabilityType': str,
                                                     'LiabilityQty': float, 'LiabilityAmt': float, 'InterestRate': float,
                                                     'DatedDate': str, 'UnderlyingSecurityID': str,
@@ -417,7 +414,7 @@ class DBTradingData:
             longqty = dict_datapatch_holding['LongQty']
             shortqty = dict_datapatch_holding['ShortQty']
             sectype = self.get_mingshi_sectype_from_code(secid_secidsrc)
-            poscost_vec = dict_datapatch_holding['PosCost_vec']
+            cash_from_ss = dict_datapatch_holding['CashFromShortSelling']
             liability_sec_qty = dict_datapatch_holding['LiabilityQty']
             liability_margin_amt = dict_datapatch_holding['LiabilityAmt']
             liability_type = dict_datapatch_holding['LiabilityType']
@@ -490,7 +487,7 @@ class DBTradingData:
                 'LongAmt': longamt,
                 'ShortAmt': shortamt,
                 'NetAmt': netamt,
-                'PosCost_vec': poscost_vec,
+                'CashFromShortSelling': cash_from_ss,
                 'LiabilityType': liability_type,
                 'LiabilityQty': liability_sec_qty,
                 'LiabilityAmt': liability_margin_amt,
@@ -756,6 +753,9 @@ class DBTradingData:
                 3. 求单账户现金管理
         todo：
             1. 新股的市值的处理（目前: 找出并删除），需要观察经纪商是如何处理的
+            2. 本函数有命名混淆：数据表中的holding包含了空头持仓信息，而实际算法中，holding实际是多头持仓。
+               FIX协议中，对此区分为两部分，holding 为多头，position为多头与空头的汇总。此处可改进
+
         """
 
         dict_wcode2close = self.df_mktdata_from_wind.set_index('WindCode').to_dict()['Close']
@@ -768,21 +768,15 @@ class DBTradingData:
             if accttype in ['c', 'm', 'o']:
                 patchmark = dict_acctinfo['PatchMark']
                 # 1.整理holding
-                # 1.1 rawdata
+                # 1.1 rawdata(无融券合约账户)
                 list_dicts_holding = list(self.db_trddata['manually_rawdata_holding'].find(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
                 ))
-                list_dicts_secdebt = list(self.db_trddata['manually_rawdata_secdebt'].find(
-                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
-                ))
-                list_dicts_holding += list_dicts_secdebt
                 list_fields_secid = ['证券代码']
                 list_fields_symbol = ['证券名称']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
                 list_fields_exchange = ['交易市场', '交易板块', '板块']
                 list_fields_longqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股', '当前持仓']
-                list_fields_shortqty = ['剩余数量']  # todo 猜测：未平仓合约的字段是这个
-                list_fields_cash_from_short_selling = ['融券卖出成本']  # 查询融券合约中无融券卖出所得现金
                 list_dicts_holding_fmtted = []
                 for dict_holding in list_dicts_holding:
                     secid = None
@@ -790,7 +784,6 @@ class DBTradingData:
                     symbol = None
                     longqty = 0
                     shortqty = 0
-                    cash_from_short_selling = 0
                     for field_secid in list_fields_secid:
                         if field_secid in dict_holding:
                             secid = str(dict_holding[field_secid])
@@ -822,14 +815,6 @@ class DBTradingData:
                         if field_longqty in dict_holding:
                             longqty = float(dict_holding[field_longqty])
 
-                    for field_shortqty in list_fields_shortqty:
-                        if field_shortqty in dict_holding:
-                            shortqty = float(dict_holding[field_shortqty])
-
-                    for field_cash_from_short_selling in list_fields_cash_from_short_selling:
-                        if field_cash_from_short_selling in dict_holding:
-                            cash_from_short_selling = float(dict_holding[field_cash_from_short_selling])
-
                     windcode_suffix = {'SZSE': '.SZ', 'SSE': '.SH'}[secidsrc]
                     windcode = secid + windcode_suffix
                     sectype = self.get_mingshi_sectype_from_code(windcode)
@@ -837,11 +822,9 @@ class DBTradingData:
                         continue
                     close = dict_wcode2close[windcode]
                     longamt = close * longqty
-                    shortamt = close * shortqty
+                    shortamt = 0
                     netamt = longamt - shortamt
 
-                    # todo 20200626更：根据上交所《融资融券合同必备条款》推测（利息为实际使用天数），负债的计量依据为实际使用数量，则债=空
-                    # todo 此处忽略利息
                     dict_holding_fmtted = {
                         'DataDate': self.str_today,
                         'AcctIDByMXZ': acctidbymxz,
@@ -854,9 +837,114 @@ class DBTradingData:
                         'LongAmt': longamt,
                         'ShortAmt': shortamt,
                         'NetAmt': netamt,
-                        'CashFromShortSelling': cash_from_short_selling,
+                        'CashFromShortSelling': 0,
                         'OTCContractUnitMarketValue': None,
-                        'LiabilityType': (lambda x: 'security debt' if x > 0 else None)(shortamt),
+                        'LiabilityType': None,
+                        'Liability': 0,
+                        'LiabilityQty': None,  # 融券数量
+                        'LiabilityAmt': None,  # 融资数量
+                        'InterestRate': None,
+                        'DatedDate': None,
+                        'UnderlyingSecurityID': None,
+                        'UnderlyingSecurityIDSource': None,
+                        'UnderlyingSecurityType': None,
+                        'UnderlyingSymbol': None,
+                        'UnderlyingQty': None,
+                        'UnderlyingAmt': 0,
+                        'UnderlyingClose': None,
+                        'UnderlyingStartValue_vec': None,
+                        'Note': None
+                    }
+                    list_dicts_holding_fmtted.append(dict_holding_fmtted)
+
+                # 处理融券合约账户
+                list_dicts_secliability = list(self.db_trddata['manually_rawdata_secliability'].find(
+                    {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
+                ))
+                shortqty_from_ss = 0  # 注： 为余额，是未偿还额
+                shortqty_from_equity_compensation = 0  # 注： 是余额
+                cash_from_ss = None
+                list_fields_shortqty_from_ss = ['剩余数量']
+                list_fields_shortqty_from_equity_compensation = ['权益补偿数量']  # 权益补偿数量，来自于股票分红，zhaos_tdx中该值为余额
+                list_fields_ss_avgprice = ['卖均价']
+                list_fields_cash_from_short_selling = ['融券卖出成本']  # CashFromShortSelling
+
+                for dict_secliability in list_dicts_secliability:
+                    secid = None
+                    secidsrc = None
+                    symbol = None
+                    longqty = 0
+                    shortqty = 0
+                    for field_secid in list_fields_secid:
+                        if field_secid in dict_secliability:
+                            secid = str(dict_secliability[field_secid])
+
+                    for field_shareholder_acctid in list_fields_shareholder_acctid:
+                        if field_shareholder_acctid in dict_secliability:
+                            shareholder_acctid = dict_secliability[field_shareholder_acctid]
+                            if shareholder_acctid[0].isalpha():
+                                secidsrc = 'SSE'
+                            if shareholder_acctid[0].isdigit():
+                                secidsrc = 'SZSE'
+
+                    for field_exchange in list_fields_exchange:
+                        if field_exchange in dict_secliability:
+                            exchange = dict_secliability[field_exchange]
+                            dict_exchange2secidsrc = {'深A': 'SZSE', '沪A': 'SSE',
+                                                      '深Ａ': 'SZSE', '沪Ａ': 'SSE',
+                                                      '上海Ａ': 'SSE', '深圳Ａ': 'SZSE',
+                                                      '00': 'SZSE', '10': 'SSE',
+                                                      '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
+                                                      '上海A股': 'SSE', '深圳A股': 'SZSE',
+                                                      }
+                            secidsrc = dict_exchange2secidsrc[exchange]
+                    for field_symbol in list_fields_symbol:
+                        if field_symbol in dict_secliability:
+                            symbol = str(dict_secliability[field_symbol])
+
+                    for field_shortqty_from_ss in list_fields_shortqty_from_ss:
+                        if field_shortqty_from_ss in dict_secliability:
+                            shortqty_from_ss = float(dict_secliability[field_shortqty_from_ss])
+
+                    for field_shortqty_from_equity_compensation in list_fields_shortqty_from_equity_compensation:
+                        if field_shortqty_from_equity_compensation in dict_secliability:
+                            shortqty_from_equity_compensation = float(
+                                dict_secliability[field_shortqty_from_equity_compensation])
+                    shortqty = shortqty_from_ss + shortqty_from_equity_compensation
+
+                    for field_ss_avgprice in list_fields_ss_avgprice:
+                        if field_ss_avgprice in dict_secliability:
+                            ss_avgprice = float(dict_secliability[field_ss_avgprice])
+                            cash_from_ss = shortqty_from_ss * ss_avgprice
+
+                    for field_cash_from_short_selling in list_fields_cash_from_short_selling:
+                        if field_cash_from_short_selling in dict_secliability:
+                            cash_from_ss = float(dict_secliability[field_cash_from_short_selling])
+
+                    windcode_suffix = {'SZSE': '.SZ', 'SSE': '.SH'}[secidsrc]
+                    windcode = secid + windcode_suffix
+                    sectype = self.get_mingshi_sectype_from_code(windcode)
+                    if sectype == 'IrrelevantItem':
+                        continue
+                    close = dict_wcode2close[windcode]
+                    longamt = close * longqty
+                    shortamt = close * shortqty
+                    netamt = longamt - shortamt
+                    dict_secliability_fmtted = {
+                        'DataDate': self.str_today,
+                        'AcctIDByMXZ': acctidbymxz,
+                        'SecurityID': secid,
+                        'SecurityType': sectype,
+                        'Symbol': symbol,
+                        'SecurityIDSource': secidsrc,
+                        'LongQty': longqty,
+                        'ShortQty': shortqty,
+                        'LongAmt': longamt,
+                        'ShortAmt': shortamt,
+                        'NetAmt': netamt,
+                        'CashFromShortSelling': cash_from_ss,
+                        'OTCContractUnitMarketValue': None,
+                        'LiabilityType': (lambda x: 'Securities Liability' if x > 0 else None)(shortamt),
                         'Liability': shortamt,
                         'LiabilityQty': (lambda x: x if x else None)(shortqty),  # 融券数量
                         'LiabilityAmt': None,  # 融资数量
@@ -872,7 +960,7 @@ class DBTradingData:
                         'UnderlyingStartValue_vec': None,
                         'Note': None
                     }
-                    list_dicts_holding_fmtted.append(dict_holding_fmtted)
+                    list_dicts_holding_fmtted.append(dict_secliability_fmtted)
 
                 # 1.2 patchdata
                 # patchdata 逻辑： 是增量补充，而不是余额覆盖
@@ -940,7 +1028,7 @@ class DBTradingData:
                     df_holding_fmtted_patched = pd.DataFrame(
                         columns=['DataDate', 'AcctIDByMXZ', 'SecurityID', 'SecurityType', 'Symbol', 'SecurityIDSource',
                                  'Symbol', 'SecurityIDSource',
-                                 'LongQty', 'ShortQty', 'LongAmt', 'ShortAmt', 'NetAmt', 'PosCost_vec',
+                                 'LongQty', 'ShortQty', 'LongAmt', 'ShortAmt', 'NetAmt', 'CashFromShortSelling',
                                  'OTCContractUnitMarketValue', 'LiabilityType', 'Liability', 'LiabilityQty',
                                  'LiabilityAmt',
                                  'InterestRate', 'DatedDate', 'UnderlyingSecurityID', 'UnderlyingSecurityIDSource',

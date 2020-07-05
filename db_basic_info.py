@@ -8,7 +8,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200624'
+        self.str_today = '20200703'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -47,11 +47,24 @@ class DatabaseBasicInfo:
                     dict_tgtitems['ETFShortAmountInMarginAccount'] = None
                 if 'CompositeShortAmountInMarginAccount' not in dict_tgtitems:
                     dict_tgtitems['CompositeShortAmountInMarginAccount'] = None
-                if 'ShortExposureFromOTCAccount' not in dict_tgtitems:
-                    dict_tgtitems['ShortExposureFromOTCAccount'] = None
+                if 'ShortExposureFromOTCAccounts' not in dict_tgtitems:
+                    dict_tgtitems['ShortExposureFromOTCAccounts'] = None
+                if 'CashFromShortSellingInMarginAccount' not in dict_tgtitems:
+                    dict_tgtitems['CashFromShortSellingInMarginAccount'] = None
+                if 'NetAssetInOTCAccounts' not in dict_tgtitems:
+                    dict_tgtitems['NetAssetInOTCAccounts'] = None
                 if 'NetAsset' not in dict_tgtitems:
                     dict_tgtitems['NetAsset'] = None
                 dict_to_be_inserted['TargetItems'] = dict_tgtitems
+            else:
+                dict_to_be_inserted['TargetItems'] = {
+                    'ETFShortAmountInMarginAccount': None,
+                    'CompositeShortAmountInMarginAccount': None,
+                    'ShortExposureFromOTCAccounts': None,
+                    'CashFromShortSellingInMarginAccount': None,
+                    'NetAssetInOTCAccounts': None,
+                    'NetAsset': None,
+                }
         self.col_prdinfo.delete_many({'DataDate': self.str_today})
         self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
         print('Collection "prdinfo" has been updated.')
