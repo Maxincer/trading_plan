@@ -71,7 +71,6 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200703'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -776,7 +775,9 @@ class DBTradingData:
                 list_fields_symbol = ['证券名称']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
                 list_fields_exchange = ['交易市场', '交易板块', '板块']
-                list_fields_longqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股', '当前持仓']
+                # 有优先级别的列表
+                list_fields_longqty = ['股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '参考持股', '当前持仓',
+                                       '实际数量', '实时余额']
                 list_dicts_holding_fmtted = []
                 for dict_holding in list_dicts_holding:
                     secid = None

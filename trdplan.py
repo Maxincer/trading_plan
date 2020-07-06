@@ -101,7 +101,6 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200703'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -217,11 +216,15 @@ class Product:
         3. 重要： EI策略中不使用ETF来补充beta
         4. 重要： 期指对冲策略中，只使用IC进行对冲
         5. 重要： 最多两个策略且由这两个策略构成： EI， MN
+        6. 重要： 分配c与m的资金时，如果有融资融券负债，要尽可能少的分给m户。
+        （限制： 1.最多净资产为cpslongamt的1.088 2. 维持担保比例要充足）
+        7. 由于公司的策略交易模式限制，更倾向于放在m户中交易。
         Note:
             1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配。
             2. 本函数未对SecurityAccounts中的 cash account 及 margin account 进行区分。
         思路：
             1. 先求EI的shape，剩下的都是MN的。
+            2. 分配普通和信用时，采取信用户净资产最小原则（不低于最低维持担保比例）
         todo 数据库中的仓位比例为cpslongamt的比例
         """
         # 参数部分 与 假设
@@ -280,7 +283,7 @@ class Product:
         # 指定仓位模式（根据self.tgt_cpspct确定cpsamt金额）：
 
         # MN 策略预算假设
-        flt_mn_cash2cpslongamt = 0.888
+        flt_mn_cash2cpslongamt = 0.0888
 
         # 2.1 分配MN策略涉及的账户资产
         mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
@@ -289,10 +292,9 @@ class Product:
 
         # 求信用户提供的空头暴露预算值
         # 求信用户中的卖出融券所得资金
-        # 合规：一个基金产品只能开立一个信用账户
         # 假设：信用户提供的空头暴露工具只有 etf 和 cps(个股)
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-            {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm'}
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
         )
         mn_etfshortamt_in_macct = 0
         mn_cpsshortamt_in_macct = 0
@@ -318,12 +320,20 @@ class Product:
         mn_cash_from_ss_in_macct_tgt = mn_cash_from_ss_in_macct
         mn_etfshortamt_in_macct_tgt = mn_etfshortamt_in_macct
         mn_cpsshortamt_in_macct_tgt = mn_cpsshortamt_in_macct
+
         if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
             mn_etfshortamt_in_macct_tgt = self.dict_tgt_items['ETFShortAmountInMarginAccount']
         if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
             mn_cpsshortamt_in_macct_tgt = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
         if self.dict_tgt_items['CashFromShortSellingInMarginAccount']:
             mn_cash_from_ss_in_macct_tgt = self.dict_tgt_items['CashFromShortSellingInMarginAccount']
+
+        mn_shortamt_in_macct = mn_etfshortamt_in_macct + mn_cpsshortamt_in_macct
+        # todo 假设： 若有融券负债，则将该渠道的cpslongamt均放入macct.
+        # todo 若无融券负债，则不对cacct 与 macct分配，使用当前值进行分配
+
+
+
 
         # 求oacct提供的空头暴露预算值与多头暴露预算值
         # 求oacct账户中的存出保证金（net_asset）
@@ -360,10 +370,10 @@ class Product:
                                                 - mn_cpsshortamt_in_macct_tgt
                                                 - mn_short_exposure_from_oaccts_tgt)
         # todo 假设: 指定IC为唯一对冲工具
-        mn_int_net_lots_index_future_tgt = self.cmp_f_lots('MN', ei_long_exposure_from_faccts, ic_if_ih)
+        mn_int_net_lots_index_future_tgt = self.cmp_f_lots('MN', mn_netamt_index_future_in_faccts_tgt, ic_if_ih)
         mn_na_faccts_tgt = (mn_int_net_lots_index_future_tgt
                             * self.gv.dict_index_future_windcode2close[self.gv.dict_index_future2spot[ic_if_ih]]
-                            * self.gv.dict_index_future2multiplier[ic_if_ih])
+                            * self.gv.dict_index_future2multiplier[ic_if_ih] * 0.2)
 
         # 求期货户提供的多空暴露预算值
         # ！！！注： 空头期指为最后算出来的项目，不可指定（指定无效）
@@ -403,7 +413,26 @@ class Product:
 
         mn_netamt_index_future_in_faccts = netamt_index_future_in_faccts - ei_netamt_faccts_tgt
 
+        # todo 资金分配
+        # 分配cacct与macct(若有负债优先分配macct，若无负债则整体达标即可)
         mn_na_saccts_tgt = mn_na_tgt - mn_na_faccts_tgt - mn_na_oaccts_tgt
+        if mn_shortamt_in_macct:
+            mn_cpslongamt_in_macct_tgt = mn_cpslongamt_tgt
+            mn_cash_2trd_in_macct_tgt = mn_cpslongamt_in_macct_tgt * flt_mn_cash2cpslongamt
+            mn_ce_in_macct_tgt = mn_cash_from_ss_in_macct_tgt
+            mn_na_macct_tgt = mn_cpslongamt_in_macct_tgt + mn_cash_2trd_in_macct_tgt
+            mn_na_cacct_tgt = mn_na_saccts_tgt - mn_na_macct_tgt
+            mn_ce_in_cacct_tgt = mn_na_cacct_tgt - 1500000
+            if mn_ce_in_cacct_tgt < 0:
+                mn_ce_in_cacct_tgt = 0
+        else:
+            mn_cpslongamt_in_macct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cash_2trd_in_macct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_na_macct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cpslongamt_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cash_2trd_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_na_cacct_tgt = 'No allocation limit between cash account and margin account.'
+
         # todo 算法需确认
         mn_ce_in_saccts_tgt = (mn_na_saccts_tgt
                                - mn_cpslongamt_tgt
@@ -438,7 +467,7 @@ class Product:
             'MNCashEquivalentOfSecurityAccounts': mn_ce_in_saccts_tgt,
             'MNCompositeLongAmountOfSecurityAccounts': mn_cpslongamt_tgt,
             'MNCompositeShortAmountOfSecurityAccounts': mn_cpsshortamt_in_macct_tgt,
-            'MNETFNetAmountOfSecurityAccounts': mn_etfshortamt_in_macct_tgt,
+            'MNETFNetAmountOfSecurityAccounts': -mn_etfshortamt_in_macct_tgt,
             'MNNetAmountOfFutureAccounts': mn_netamt_index_future_in_faccts_tgt,
             'MNContractsNetLotsOfFutureAccounts': mn_int_net_lots_index_future_tgt,  # todo 此处仅指IC合约
             'MNNetExposureFromOTCAccounts': mn_short_exposure_from_oaccts_tgt,
