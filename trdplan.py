@@ -221,7 +221,7 @@ class Product:
         7. 由于公司的策略交易模式限制，更倾向于放在m户中交易。
         Note:
             1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配。
-            2. 本函数未对SecurityAccounts中的 cash account 及 margin account 进行区分。
+            2. 本项目中资金的渠道分配是以营业部为主体，而非券商。（同一券商可能会有多个资金渠道）
         思路：
             1. 先求EI的shape，剩下的都是MN的。
             2. 分配普通和信用时，采取信用户净资产最小原则（不低于最低维持担保比例）
@@ -332,9 +332,6 @@ class Product:
         # todo 假设： 若有融券负债，则将该渠道的cpslongamt均放入macct.
         # todo 若无融券负债，则不对cacct 与 macct分配，使用当前值进行分配
 
-
-
-
         # 求oacct提供的空头暴露预算值与多头暴露预算值
         # 求oacct账户中的存出保证金（net_asset）
         # 根据实际业务做出假设：1. oacct全部用于MN策略 2.oacct仅提供short exposure
@@ -413,31 +410,37 @@ class Product:
 
         mn_netamt_index_future_in_faccts = netamt_index_future_in_faccts - ei_netamt_faccts_tgt
 
-        # todo 资金分配
+        # 资金分配
         # 分配cacct与macct(若有负债优先分配macct，若无负债则整体达标即可)
+        # 公司内部分配算法：信用户如有负债则在信用户中留足够开满仓的资金（0.77 * mn_na_tgt），
         mn_na_saccts_tgt = mn_na_tgt - mn_na_faccts_tgt - mn_na_oaccts_tgt
         if mn_shortamt_in_macct:
-            mn_cpslongamt_in_macct_tgt = mn_cpslongamt_tgt
+            mn_na_macct_tgt = mn_na_tgt * 0.77 * (1 + flt_mn_cash2cpslongamt)  # 按分配到该渠道的满仓资金计算，分配给macct
+            mn_cpslongamt_in_macct_tgt = mn_cpslongamt_tgt  # 注意 此处可能不是满仓(0.77)
             mn_cash_2trd_in_macct_tgt = mn_cpslongamt_in_macct_tgt * flt_mn_cash2cpslongamt
-            mn_ce_in_macct_tgt = mn_cash_from_ss_in_macct_tgt
-            mn_na_macct_tgt = mn_cpslongamt_in_macct_tgt + mn_cash_2trd_in_macct_tgt
+            mn_ce_in_macct_tgt = mn_na_macct_tgt - mn_cpslongamt_in_macct_tgt - mn_cash_2trd_in_macct_tgt
+            mn_ce_from_cash_from_ss_tgt = mn_cash_from_ss_in_macct_tgt
             mn_na_cacct_tgt = mn_na_saccts_tgt - mn_na_macct_tgt
             mn_ce_in_cacct_tgt = mn_na_cacct_tgt - 1500000
             if mn_ce_in_cacct_tgt < 0:
                 mn_ce_in_cacct_tgt = 0
+            mn_cash_in_cacct_tgt = mn_na_cacct_tgt - mn_ce_in_cacct_tgt
+            mn_ce_in_saccts_tgt = mn_ce_in_cacct_tgt + mn_ce_in_macct_tgt
+            mn_cash_in_saccts_tgt = mn_cash_in_cacct_tgt + mn_cash_2trd_in_macct_tgt
+            mn_cpslongamt_in_cacct_tgt = 0
+            mn_cash_in_macct_tgt = mn_cash_2trd_in_macct_tgt
         else:
             mn_cpslongamt_in_macct_tgt = 'No allocation limit between cash account and margin account.'
             mn_cash_2trd_in_macct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cash_in_macct_tgt = mn_cash_2trd_in_macct_tgt
             mn_na_macct_tgt = 'No allocation limit between cash account and margin account.'
             mn_cpslongamt_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
-            mn_cash_2trd_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cash_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
             mn_na_cacct_tgt = 'No allocation limit between cash account and margin account.'
-
-        # todo 算法需确认
-        mn_ce_in_saccts_tgt = (mn_na_saccts_tgt
-                               - mn_cpslongamt_tgt
-                               - mn_cash_2trd_in_saccts_tgt
-                               + mn_cash_from_ss_in_macct_tgt)
+            mn_ce_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_ce_in_macct_tgt = 'No allocation limit between cash account and margin account.'
+            mn_cash_in_saccts_tgt = mn_cash_2trd_in_saccts_tgt
+            mn_ce_in_saccts_tgt = mn_na_saccts_tgt - mn_cpslongamt_tgt - mn_cash_in_saccts_tgt
 
         dict_tgt = {
             'DataDate': self.str_today,
@@ -448,26 +451,36 @@ class Product:
             'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
             'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
             'EINetAssetAllocationBetweenCapitalSources': {},
-            'EICashOfSecurityAccounts': ei_cash_in_saccts_tgt,
-            'EICashEquivalentOfSecurityAccounts': ei_ce_in_saccts_tgt,
-            'EICompositeLongAmountOfSecurityAccounts': ei_cpslongamt_tgt,
-            'EICompositeShortAmountOfSecurityAccounts': ei_cpsshortamt_tgt,
-            'EIETFLongAmountOfSecurityAccounts': ei_etflongamt_tgt,
-            'EIETFShortAmountOfSecurityAccounts': ei_etfshortamt_tgt,
-            'EINetAmountOfFutureAccounts': ei_netamt_faccts_tgt,
-            'EIContractsNetLotsOfFutureAccounts': ei_int_net_lots_index_future_tgt,  # todo 此处仅指IC合约
+            'EICashInSecurityAccounts': ei_cash_in_saccts_tgt,
+            'EICashEquivalentInSecurityAccounts': ei_ce_in_saccts_tgt,
+            'EICompositeLongAmountInSecurityAccounts': ei_cpslongamt_tgt,
+            'EICompositeShortAmountInSecurityAccounts': ei_cpsshortamt_tgt,
+            'EIETFLongAmountInSecurityAccounts': ei_etflongamt_tgt,
+            'EIETFShortAmountInSecurityAccounts': ei_etfshortamt_tgt,
+            'EINetAmountInFutureAccounts': ei_netamt_faccts_tgt,
+            'EIContractsNetLotsInFutureAccounts': ei_int_net_lots_index_future_tgt,  # todo 此处仅指IC合约
             'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
             'EIPositionAllocationBetweenCapitalSources': {},
             'MNNetAsset': mn_na_tgt,
             'MNNetAssetOfSecurityAccounts': mn_na_saccts_tgt,
+            'MNNetAssetOfCashAccount': mn_na_cacct_tgt,
+            'MNNetAssetOfMarginAccount': mn_na_macct_tgt,
             'MNNetAssetOfFutureAccounts': mn_na_faccts_tgt,
             'MNNetAssetOfOTCAccounts': mn_na_oaccts_tgt,
             'MNNetAssetAllocationBetweenCapitalSources': {},
-            'MNCashOfSecurityAccounts': mn_cash_2trd_in_saccts_tgt,
-            'MNCashEquivalentOfSecurityAccounts': mn_ce_in_saccts_tgt,
-            'MNCompositeLongAmountOfSecurityAccounts': mn_cpslongamt_tgt,
-            'MNCompositeShortAmountOfSecurityAccounts': mn_cpsshortamt_in_macct_tgt,
-            'MNETFNetAmountOfSecurityAccounts': -mn_etfshortamt_in_macct_tgt,
+            'MNCashInSecurityAccounts': mn_cash_in_saccts_tgt,
+            'MNCashInCashAccount': mn_cash_in_cacct_tgt,
+            'MNCashInMarginAccount': mn_cash_in_macct_tgt,
+            'MNCashEquivalentInSecurityAccounts': mn_ce_in_saccts_tgt,
+            'MNCashEquivalentInCashAccount': mn_ce_in_cacct_tgt,
+            'MNCashEquivalentInMarginAccount': mn_ce_in_macct_tgt,
+            'MNCompositeLongAmountInSecurityAccounts': mn_cpslongamt_tgt,
+            'MNCompositeLongAmountInCashAccount': mn_cpslongamt_in_cacct_tgt,
+            'MNCompositeLongAmountInMarginAccount': mn_cpslongamt_in_macct_tgt,
+            'MNCompositeShortAmountInSecurityAccounts': mn_cpsshortamt_in_macct_tgt,
+            'MNCompositeShortAmountInMarginAccount': mn_cpsshortamt_in_macct_tgt,
+            'MNETFNetAmountInSecurityAccounts': -mn_etfshortamt_in_macct_tgt,
+            'MNETFShortAmountInMarginAccount': mn_etfshortamt_in_macct_tgt,
             'MNNetAmountOfFutureAccounts': mn_netamt_index_future_in_faccts_tgt,
             'MNContractsNetLotsOfFutureAccounts': mn_int_net_lots_index_future_tgt,  # todo 此处仅指IC合约
             'MNNetExposureFromOTCAccounts': mn_short_exposure_from_oaccts_tgt,
