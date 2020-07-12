@@ -39,6 +39,8 @@
       <w>dbclient</w>
       <w>dirpath</w>
       <w>dupatch</w>
+      <w>dwitems</w>
+      <w>dwitemsid</w>
       <w>ehtc</w>
       <w>etflongamt</w>
       <w>etfshortamt</w>
@@ -53,6 +55,7 @@
       <w>hait</w>
       <w>hexin</w>
       <w>huat</w>
+      <w>iclots</w>
       <w>indexfuture</w>
       <w>liabilityamt</w>
       <w>liabilityqty</w>
@@ -85,6 +88,7 @@
       <w>prdcode</w>
       <w>prdcodes</w>
       <w>prdinfo</w>
+      <w>prdna</w>
       <w>qtyamt</w>
       <w>rawdata</w>
       <w>readlines</w>
@@ -93,6 +97,7 @@
       <w>rptmark</w>
       <w>sacct</w>
       <w>saccts</w>
+      <w>secaccts</w>
       <w>seccode</w>
       <w>secdebt</w>
       <w>secid</w>
@@ -111,6 +116,7 @@
       <w>shortqty</w>
       <w>shortselling</w>
       <w>skiprows</w>
+      <w>srcs</w>
       <w>startvalue</w>
       <w>swapamt</w>
       <w>swhy</w>
@@ -131,6 +137,7 @@
       <w>windcode</w>
       <w>windcodes</w>
       <w>wset</w>
+      <w>wtdayoffset</w>
       <w>xlsx</w>
       <w>yyyymmdd</w>
       <w>zhao</w>

@@ -71,14 +71,19 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200710'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
-        self.col_acctinfo = self.client_mongo['basicinfo']['acctinfo']
         self.db_trddata = self.client_mongo['trddata']
+        self.db_basicinfo = self.client_mongo['basicinfo']
+        self.col_acctinfo = self.db_basicinfo['acctinfo']
+        self.col_prdinfo = self.db_basicinfo['prdinfo']
         self.dirpath_data_from_trdclient = 'data/trdrec_from_trdclient'
         self.fpath_datapatch_relative = 'data/data_patch.xlsx'
         self.dict_future2multiplier = {'IC': 200, 'IH': 300, 'IF': 300}
+        self.col_fmtted_dwitems = self.db_trddata['fmtted_dwitems']
+        self.col_manually_patchdata_dwitems = self.db_trddata['manually_patchdata_dwitems']
 
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
@@ -522,7 +527,91 @@ class DBTradingData:
         if list_dicts_patch_capital:
             self.db_trddata['manually_patchdata_capital'].insert_many(list_dicts_patch_capital)
 
+        # 上传划款数据
+        """
+        Abbr.:
+            1. DW: deposit and withdraw, 产品出入金的事项。
+            2. 事项包括：
+                1. Subscribe and Purchase, 认购与申购
+                2. Redemption, 赎回
+                3. Dividends Distribution, 分红
+        思路：
+            1.更新SPR事项的原始数据表，按照表中的当日数据更新。
+            2.可以对遗漏事项进行补充，DataDate为当日，NoticeDateTime为往日。
+            3.本函数更新原始数据，再提炼出有效数据，进行运算。
+            4.划款事项数据的主键为： NoticeDateTime, PrdCode, DWItem, CapitalSource, UNAVDate
+        假设：
+            1.重要，DWItemsID按升序依次填写 
+        """
+        df_datapatch_dwitems = pd.DataFrame(list(self.col_manually_patchdata_dwitems.find()))
+        if df_datapatch_dwitems.empty:
+            int_dwitemsid_max = 0
+        else:
+            int_dwitemsid_max = df_datapatch_dwitems['DWItemsID'].apply(int).max()
+
+        df_datapatch_dwitems_read_excel = pd.read_excel(self.fpath_datapatch_relative, sheet_name='dwitems',
+                                                        dtype={'DataDate': str, 'DWItemsID': str,
+                                                               'NoticeDateTime': str, 'PrdCode': str, 'UNAVDate': str,
+                                                               'Amt': float, 'Shares': float})
+        list_dicts_dwitems_read_excel = df_datapatch_dwitems_read_excel.to_dict('records')
+        list_dicts_dwitems_2b_inserted = []
+        for dict_dwitems_read_excel in list_dicts_dwitems_read_excel:
+            int_dwitemsid = int(dict_dwitems_read_excel['DWItemsID'])
+            if int_dwitemsid > int_dwitemsid_max:
+                dict_dwitems_read_excel['DataDate'] = self.str_today
+                list_dicts_dwitems_2b_inserted.append(dict_dwitems_read_excel)
+        df_datapatch_dwitems_2b_inserted = pd.DataFrame(list_dicts_dwitems_2b_inserted)
+        df_datapatch_dwitems_2b_inserted = (df_datapatch_dwitems_2b_inserted
+                                            .where(df_datapatch_dwitems_2b_inserted.notnull(), None))
+        list_dicts_patch_dwitems = df_datapatch_dwitems_2b_inserted.to_dict('record')
+        self.db_trddata['manually_patchdata_dwitems'].delete_many({'DataDate': self.str_today})
+        if list_dicts_patch_dwitems:
+            self.db_trddata['manually_patchdata_dwitems'].insert_many(list_dicts_patch_dwitems)
+
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
+
+    def update_fmtted_dwitems(self):
+        """
+        将原始划款数据进行整理，整理为做tp_plan可用的格式
+        关键字段： EffectiveDate.
+        1. DataDate, 为本条数据客观上生成的时间
+        2. EffectiveDate, 为划款事项影响交易计划的时间
+        3. NoticeDateTime, 为划款事项的通知时间
+        4. ExpectedDWDate, 为划款事项的预计划款时间
+        todo 需提炼
+
+        """
+        list_dicts_patchdata_dwitems = list(self.col_manually_patchdata_dwitems.find({'DataDate': self.str_today}))
+
+    def update_na_allocation(self):
+        """
+        时间序列，分配产品渠道比例
+        """
+        list_dicts_prdinfo = list(self.col_prdinfo.find({'DataDate': self.str_today}))
+        list_dicts_na_allocation = []
+        for dict_prdinfo in list_dicts_prdinfo:
+            prdcode = dict_prdinfo['PrdCode']
+            dict_na_allocation = dict_prdinfo['NetAssetAllocation']
+            if dict_na_allocation:
+                if 'security' in dict_na_allocation:
+                    dict_na_allocation_saccts = dict_na_allocation['security']
+                else:
+                    dict_na_allocation_saccts = None
+                if 'future' in dict_na_allocation:
+                    dict_na_allocation_faccts = dict_na_allocation['future']
+                else:
+                    dict_na_allocation_faccts = None
+                dict_na_allocation = {
+                    'DataDate': self.str_today,
+                    'PrdCode': prdcode,
+                    'SecurityAccountsNetAssetAllocation': dict_na_allocation_saccts,
+                    'FutureAccountsNetAssetAllocation': dict_na_allocation_faccts,
+                }
+                list_dicts_na_allocation.append(dict_na_allocation)
+        self.db_trddata['na_allocation'].delete_many({'DataDate': self.str_today})
+        if list_dicts_na_allocation:
+            self.db_trddata['na_allocation'].insert_many(list_dicts_na_allocation)
+        print('Update na allocation finished')
 
     def get_close_from_wind(self):
         """
@@ -1322,8 +1411,10 @@ class DBTradingData:
 
     def run(self):
         # self.update_trddata_f()
-        self.update_rawdata()
-        self.update_manually_patchdata()
+        # self.update_rawdata()
+        # self.update_manually_patchdata()
+        # self.update_fmtted_dwitems()
+        self.update_na_allocation()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
         print("Database preparation finished.")

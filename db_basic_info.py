@@ -8,6 +8,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200710'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -48,6 +49,8 @@ class DatabaseBasicInfo:
                     dict_tgtitems['CompositeShortAmountInMarginAccount'] = None
                 if 'ShortExposureFromOTCAccounts' not in dict_tgtitems:
                     dict_tgtitems['ShortExposureFromOTCAccounts'] = None
+                if 'NetExposureFromOTCAccounts' not in dict_tgtitems:
+                    dict_tgtitems['NetExposureFromOTCAccounts'] = None
                 if 'CashFromShortSellingInMarginAccount' not in dict_tgtitems:
                     dict_tgtitems['CashFromShortSellingInMarginAccount'] = None
                 if 'NetAssetInOTCAccounts' not in dict_tgtitems:
@@ -60,6 +63,7 @@ class DatabaseBasicInfo:
                     'ETFShortAmountInMarginAccount': None,
                     'CompositeShortAmountInMarginAccount': None,
                     'ShortExposureFromOTCAccounts': None,
+                    'NetExposureFromOTCAccounts': None,
                     'CashFromShortSellingInMarginAccount': None,
                     'NetAssetInOTCAccounts': None,
                     'NetAsset': None,

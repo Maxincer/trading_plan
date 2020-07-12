@@ -1,23 +1,17 @@
 # 算法： perfect shape
 # coding:utf-8
-from pymongo import MongoClient
-from math import floor
 
-net_asset = 13650
-strategy = 'n' # n for neutral, eif for enhanced index fund
-alpha_position_percent = 0.77
+from sympy import solve, Symbol
+import pandas as pd
 
-spot500 = 5787.15
 
-def get_perfect_shape(net_asset, strategy, alpha_position_percent):
-    margin_required_by_ms = spot500 * 200 * 0.2
-    future_contract_value = spot500 * 200
-    stock_amt = net_asset * alpha_position_percent
-    if strategy == 'n':
-        future_contract_lots = floor(stock_amt / future_contract_value)
-        short_amt_provided_by_future = future_contract_lots * future_contract_value
-        stock_amt_final = short_amt_provided_by_future
+x = Symbol('x')
+y = Symbol('y')
+z = 100
+solve = solve([z + 3000 + 1.09 * x + 26.8 * (y+1) - 10134, x + 134 * (y+1) - 10134 * 0.8], x, y, z)
+print(solve)
+# print(solve([x**2 + y -2, y**2 - 4], x, y, set=True))
 
-dict_917 = MongoClient('mongodb://localhost:27017/')['basicinfo']['prdinfo'].find_one({'PrdCode': '917'})
-a = dict_917['NetAssetAllocation']
-print('done')
+s_a = pd.Series([1,2,3,5])
+print(type(s_a.max()))
+
