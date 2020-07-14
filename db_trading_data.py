@@ -71,7 +71,6 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200710'
         w.start()
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -1411,9 +1410,9 @@ class DBTradingData:
 
     def run(self):
         # self.update_trddata_f()
-        # self.update_rawdata()
-        # self.update_manually_patchdata()
-        # self.update_fmtted_dwitems()
+        self.update_rawdata()
+        self.update_manually_patchdata()
+        self.update_fmtted_dwitems()
         self.update_na_allocation()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
