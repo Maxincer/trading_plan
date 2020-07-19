@@ -55,6 +55,7 @@ Note:
 Abbr.:
     1. ss: short selling
 
+
 """
 
 import os
@@ -197,8 +198,8 @@ class DBTradingData:
             list_ret.append(dict_rec_capital)
 
         elif str_c_h_secliability_mark == 'holding':
-            if data_source_type in ['huat_hx', 'hait_hx', 'zhes_hx', 'zhaos_tdx', 'wk_hx', 'db_hx', 'tf_hx', 'yh_hx',
-                                    'xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
+            if data_source_type in ['zhaos_tdx','xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
+                                    'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     start_index_holding = None
@@ -214,6 +215,29 @@ class DBTradingData:
 
                     for dataline in list_datalines[start_index_holding + 1:]:
                         list_data = dataline.strip().split()
+                        if len(list_data) == i_list_keys_length:
+                            list_values = [x.decode('gbk') for x in list_data]
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            list_ret.append(dict_rec_holding)
+
+            elif data_source_type in ['huat_hx', 'yh_hx', 'wk_hx', 'hait_hx',
+                                      'zhes_hx', 'db_hx', 'tf_hx'] and accttype in ['c', 'm']:
+                # 注： 证券名称中 有的有空格, 核新派以制表符分隔
+                with open(fpath, 'rb') as f:
+                    list_datalines = f.readlines()
+                    start_index_holding = None
+                    for index, dataline in enumerate(list_datalines):
+                        if '证券代码' in dataline.decode('gbk'):
+                            start_index_holding = index
+                    list_keys = [x.decode('gbk') for x in list_datalines[start_index_holding].strip().split()]
+                    list_keys_2b_dropped = ['折算汇率', '备注']
+                    for key_2b_dropped in list_keys_2b_dropped:
+                        if key_2b_dropped in list_keys:
+                            list_keys.remove(key_2b_dropped)
+                    i_list_keys_length = len(list_keys)
+
+                    for dataline in list_datalines[start_index_holding + 1:]:
+                        list_data = dataline.strip().split(b'\t')
                         if len(list_data) == i_list_keys_length:
                             list_values = [x.decode('gbk') for x in list_data]
                             dict_rec_holding = dict(zip(list_keys, list_values))
@@ -1221,6 +1245,7 @@ class DBTradingData:
                 flt_composite_short_amt = stock_shortamt
 
                 # 2.8 liability
+                # liability = 融券负债（利息+本金）+ 融资负债（利息+本金）
                 if flt_capital_debt is None:
                     flt_capital_debt = 0
                 flt_liability = float(df_holding_fmtted_patched['Liability'].sum()) + flt_capital_debt
