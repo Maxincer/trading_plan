@@ -59,6 +59,7 @@ Abbr.:
 """
 
 import os
+from time import sleep
 
 from openpyxl import load_workbook
 import pandas as pd
@@ -375,6 +376,7 @@ class DBTradingData:
         for _ in cursor_find:
             list_future_data_capital = []
             list_future_data_holding = []
+            list_future_data_trdrec = []
             prdcode = _['PrdCode']
             acctidbymxz = _['AcctIDByMXZ']
             acctidbybroker = _['AcctIDByBroker']
@@ -404,6 +406,19 @@ class DBTradingData:
                                                                    'AcctIDByMXZ': acctidbymxz})
                 if list_future_data_holding:
                     self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
+            sleep(1)
+            dict_res_trdrec = trader.query_trading()
+            if dict_res_trdrec['success']:
+                list_dicts_trdrec = dict_res_trdrec['list']
+                for dict_trdrec in list_dicts_trdrec:
+                    dict_trdrec['DataDate'] = self.str_today
+                    dict_trdrec['AcctIDByMXZ'] = acctidbymxz
+                    dict_trdrec['PrdCode'] = prdcode
+                    list_future_data_trdrec.append(dict_trdrec)
+                self.db_trddata['future_api_trdrec'].delete_many({'DataDate': self.str_today,
+                                                                  'AcctIDByMXZ': acctidbymxz})
+                if list_future_data_trdrec:
+                    self.db_trddata['future_api_trdrec'].insert_many(list_future_data_trdrec)
 
     def update_manually_patchdata(self):
         """
@@ -1434,13 +1449,13 @@ class DBTradingData:
         print('Update b/s by prdcode and exposure analysis by prdcode finished')
 
     def run(self):
-        # self.update_trddata_f()
-        self.update_rawdata()
-        self.update_manually_patchdata()
-        self.update_fmtted_dwitems()
-        self.update_na_allocation()
-        self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
-        self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
+        self.update_trddata_f()
+        # self.update_rawdata()
+        # self.update_manually_patchdata()
+        # self.update_fmtted_dwitems()
+        # self.update_na_allocation()
+        # self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
+        # self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
         print("Database preparation finished.")
 
 

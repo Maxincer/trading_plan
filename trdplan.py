@@ -331,6 +331,7 @@ class Product:
                 prdna = self.dict_tgt_items['NetAsset']
         ei_na_tgt = prdna * self.dict_strategies_allocation['EI']
         mn_na_tgt = prdna * self.dict_strategies_allocation['MN']
+        list_dicts_bgt = []
         if dict_na_allocation:
             dict_na_allocation_saccts = dict_na_allocation['SecurityAccountsNetAssetAllocation']
             if dict_na_allocation_saccts:
@@ -367,30 +368,24 @@ class Product:
                     ei_capital_debt_src1 = 0
                     ei_liability_src1 = 0
                     ei_special_na_src1 = 0
-
                     ei_etflongamt_src2 = 0
                     ei_na_oaccts_src2 = 0
                     ei_capital_debt_src2 = 0
                     ei_liability_src2 = 0
                     ei_special_na_src2 = 0
-
                     ei_cpsshortamt_src1 = 0
                     ei_etfshortamt_src1 = 0
                     ei_net_exposure_from_oaccts_src1 = 0
-
                     ei_cpsshortamt_src2 = 0
                     ei_etfshortamt_src2 = 0
                     ei_net_exposure_from_oaccts_src2 = 0
-
                     ei_ce_from_ss_src1 = 0
                     ei_ce_from_ss_src2 = 0
 
                     mn_etflongamt_src1 = 0
                     mn_special_na_src1 = 0
-
                     mn_etflongamt_src2 = 0
                     mn_special_na_src2 = 0
-
                     # 由于场外账户融券业务的会计规则未知，故先按照0处理
                     mn_security_debt_in_oaccts_src1 = 0
                     mn_security_debt_in_oaccts_src2 = 0
@@ -868,17 +863,25 @@ class Product:
                             'CEFromCashFromSS': ce_from_cash_from_ss_src2,
                             'CEFromCashAvailable': ce_from_cash_available_in_macct_src2,
                         },
-                        {
-                            'PrdCode': self.prdcode,
-                            'AcctIDByMXZ': 'faccts',
-                            'NA': na_faccts,
-                            'CPSLongAmt': None,
-                            'ICLots': iclots_total,
-                            'CashAvailable': None,
-                            'CEFromCashFromSS': None,
-                            'CEFromCashAvailable': None
-                        }
                     ]
+                    list_dicts_bgt += list_dicts_bgt_secaccts
+
+                    # todo 当渠道有两个时，分配期货账户中的资金和仓位。
+
+                    dict_na_allocation_faccts = dict_na_allocation['FutureAccountsNetAssetAllocation']
+                    if dict_na_allocation_faccts:
+                        pass
+
+
+
+
+
+
+
+
+
+
+
         else:
             # 单渠道算法（无na_allocation: 仅有src1）
             # 假设：
