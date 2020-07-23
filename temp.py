@@ -7,8 +7,8 @@ import pandas as pd
 
 x = Symbol('x', real=True)
 y = Symbol('y', real=True)
-# solve = solve([x * 1.088 + y * 26.5 - 11528 - 920, x + 133 * y - (11528 + 920) * 0.99], x, y)
-ret = linsolve([35965 - x - 3 * (12102 - x) - 2410], x)
+# solve = solve([x * 1.088 + y * 26.5 - 11528 - 920,. x + 133 * y - (11528 + 920) * 0.99], x, y)
+ret = solve([33385 - x - 3 * (11872 - x) - 1660], x)
 print(ret)
 
 

@@ -11,6 +11,10 @@
     1. ETF: exchange traded fund: 交易所交易基金。不存在场外ETF。
     2. 换仓资金： 本项目统一为目标仓位的0.889
     3. 本项目中，所有产品的融资数据均由patchdata 传入
+    4. 当指定的仓位小于max仓位（未满仓）时，在满足产品仓位达标后，还需分配渠道 todo 假设： 分配比例为渠道比例
+    5. 在多渠道且有货基的条件下，产品的各渠道的货基值，受各渠道分配到的期指数量影响 todo 假设： 分配比例为渠道比例
+
+
 
 合规假设：
     1. 融资融券业务相关：
@@ -67,6 +71,8 @@
             融券专用证券账户、客户信用交易担保证券账户、 融资专用资金账户及客户信用交易担保资金账户，并在开户后3个交易日内报本所备案。
             《上海证券交易所融资融券交易实施细则》第七条，会员在向客户融资、融券前，应当按照有关规定与客户签订融资融券合同及融资融券交易风险揭示
             书，并为其开立信用证券账户和信用资金账户。
+    2. 账户相关：
+        1. 一个基金产品最多有3个普通证券账户，1个信用证券账户，3个期货账户。
 
 Abbr.:
     1. cps: composite
@@ -84,6 +90,7 @@ todo:
         1. 目前状态仅在patchdata 更新时考虑了利息，在源数据的读取中没有考虑利息。
         2. 源数据中提供了利息的应还与未还数据，故可以改进算法，精准计算。
         3. 目前的na=总资产-负债，负债中未计算利息的产品，na会被高估
+    5. AcctType 中的c,m,f,o 统一改为大写
 Memo:
     1. 1203 的个券融券开仓时间为20200623
     3.
@@ -102,6 +109,8 @@ Naming Convention:
         4. Accounts 为 Account的复数形式，表示全部Account的意思。
         5. 根据《上海证券交易所融资融券交易实施细则》，“证券类资产”，是指投资者持有的客户交易结算资金、股票、债券、基金、证券公司资管计划等资产。
     2. Cash Available: 本脚本中，将信用户可用于交易的资金，叫做Cash Available
+    3. 本项目中，对于合计项目(如iclots_total)total标识一定要加上.
+    4. 对于净资产，为避免与None值缩写’N/A,NA'产生混淆，统一使用NAV
 
 """
 from datetime import datetime
@@ -116,7 +125,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200717'
+        self.str_today = '20200722'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -170,6 +179,9 @@ class GlobalVariable:
         self.str_yesterday = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.col_spr = self.db_trddata['spr']
         self.fpath_datapatch = '/data/data_patch.xlsx'
+        self.index_future = 'IC'
+        self.flt_cash2cpslongamt = 0.0889
+        self.col_bgt_by_acctidbymxz = self.db_trddata['col_bgt_by_acctidbymxz']
 
 
 class Product:
@@ -188,7 +200,7 @@ class Product:
             self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         else:
             self.dict_strategies_allocation = None
-        self.dict_na_allocation = self.dict_prdinfo['NetAssetAllocation']
+        self.dict_na_allocation = self.gv.col_na_allocation.find_one({'PrdCode': prdcode, 'DataDate': self.str_today})
         self.tgt_cpspct = self.dict_prdinfo['TargetCompositePercentage']
         self.dict_tgt_items = self.dict_prdinfo['TargetItems']
         self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
@@ -197,6 +209,13 @@ class Product:
         self.prd_approximate_na = dict_bs_by_prdcode['ApproximateNetAsset']
         self.prd_ttasset = dict_bs_by_prdcode['TotalAsset']
         self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
+        self.list_dicts_bgt_by_acctidbymxz = []
+        self.prdna_tgt = self.prd_approximate_na
+        if self.dict_tgt_items:
+            if self.dict_tgt_items['NetAsset']:
+                self.prdna_tgt = self.dict_tgt_items['NetAsset']
+        self.ei_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['EI']
+        self.mn_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['MN']
 
     def check_exposure(self):
         dict_exposure_analysis_by_prdcode = self.gv.col_exposure_analysis_by_prdcode.find_one(
@@ -275,6 +294,164 @@ class Product:
         # todo 对该表的通知时间字段建立降序索引，取最新值。
         dict_spr = self.gv.col_spr.find_one({'EffectiveDate': self.str_today, 'PrdCode': self.prdcode})
 
+    def allocate_faccts(self, iclots_total):
+        index_future = self.gv.index_future
+        na_faccts = abs(iclots_total) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
+        if self.dict_na_allocation:
+            dict_na_allocation_faccts = self.dict_na_allocation['FutureAccountsNetAssetAllocation']
+            if dict_na_allocation_faccts:
+                if len(dict_na_allocation_faccts) == 2:
+                    list_keys_na_allocation_faccts = list(dict_na_allocation_faccts.keys())
+                    list_keys_na_allocation_faccts.sort()
+                    print(f'顺序为： {list_keys_na_allocation_faccts}')
+                    list_values_na_allocation_faccts = [dict_na_allocation_faccts[x]
+                                                        for x in list_keys_na_allocation_faccts]
+                    specified_na_facct = 0  # 求定值
+                    specified_na_the_other_idx = None
+                    specified_na_facct_idx = None
+
+                    for idx, value_na_allocation_faccts in enumerate(list_values_na_allocation_faccts):
+                        if isinstance(value_na_allocation_faccts, str):
+                            specified_na_the_other_idx = idx
+                        elif value_na_allocation_faccts > 1:
+                            specified_na_facct = value_na_allocation_faccts
+                            specified_na_facct_idx = idx
+                        else:
+                            continue
+
+                    # todo 需改进： 当定值大于开出iclots_total 所需要的na的处理(方程组需改进)
+                    if specified_na_facct > 0:  # 若定值 > 0, 使用定值算法
+                        specified_na_the_other_facct_src = list_keys_na_allocation_faccts[specified_na_the_other_idx]
+                        acctidbymxz_facct_the_other_src = self.gv.col_acctinfo.find_one(
+                            {
+                                'DataDate': self.str_today,
+                                'CapitalSource': specified_na_the_other_facct_src,
+                                'AcctType': 'f',
+                            }
+                        )['AcctIDByMXZ']
+                        specified_na_facct_src = list_keys_na_allocation_faccts[specified_na_facct_idx]
+                        acctidbymxz_facct_specified_src = self.gv.col_acctinfo.find_one(
+                            {
+                                'DataDate': self.str_today,
+                                'CapitalSource': specified_na_facct_src,
+                                'AcctType': 'f',
+                            }
+                        )['AcctIDByMXZ']
+
+                        specified_na_the_other = 0
+                        if specified_na_facct > na_faccts:
+                            iclots_in_specified_facct = iclots_total
+                            iclots_in_the_other_facct = 0
+                            print('Waring: Specified na in faccts exceeds internally required na.')
+                        else:
+                            iclots_in_specified_facct = int(
+                                    specified_na_facct
+                                    / self.gv.dict_index_future2internal_required_na_per_lot[index_future]
+                            )
+                            iclots_in_the_other_facct = iclots_total - iclots_in_specified_facct
+                            specified_na_the_other = na_faccts - specified_na_facct
+
+                        list_dicts_bgt_faccts = [
+                            {
+                                'PrdCode': self.prdcode,
+                                'AcctIDByMXZ': acctidbymxz_facct_specified_src,
+                                'NAV': specified_na_facct,
+                                'CPSLongAmt': None,
+                                'ICLots': iclots_in_specified_facct,
+                                'CEFromCashFromSS': None,
+                                'CEFromCashAvailable': None,
+                            },
+                            {
+                                'PrdCode': self.prdcode,
+                                'AcctIDByMXZ': acctidbymxz_facct_the_other_src,
+                                'NAV': specified_na_the_other,
+                                'CPSLongAmt': None,
+                                'ICLots': iclots_in_the_other_facct,
+                                'CEFromCashFromSS': None,
+                                'CEFromCashAvailable': None,
+                            }
+                        ]
+
+                    else:  # 若定值<=0, 使用定比算法
+                        src1_faccts = list_keys_na_allocation_faccts[0]
+                        acctidbymxz_facct_src1 = self.gv.col_acctinfo.find_one(
+                            {
+                                'DataDate': self.str_today,
+                                'CapitalSource': src1_faccts,
+                                'AcctType': 'f',
+                            }
+                        )['AcctIDByMXZ']
+                        iclots_src1 = round(iclots_total * list_values_na_allocation_faccts[0])
+                        na_facct_src1 = abs(iclots_src1
+                                            * self.gv.dict_index_future2internal_required_na_per_lot[
+                                                index_future])
+
+
+                        src2_faccts = list_keys_na_allocation_faccts[1]
+                        acctidbymxz_facct_src2 = self.gv.col_acctinfo.find_one(
+                            {
+                                'DataDate': self.str_today,
+                                'CapitalSource': src2_faccts,
+                                'AcctType': 'f',
+                            }
+                        )['AcctIDByMXZ']
+                        iclots_src2 = round(iclots_total * list_values_na_allocation_faccts[1])
+                        na_facct_src2 = abs(iclots_src2
+                                            * self.gv.dict_index_future2internal_required_na_per_lot[
+                                                index_future])
+
+                        list_dicts_bgt_faccts = [
+                            {
+                                'PrdCode': self.prdcode,
+                                'AcctIDByMXZ': acctidbymxz_facct_src1,
+                                'NAV': na_facct_src1,
+                                'CPSLongAmt': None,
+                                'ICLots': iclots_src1,
+                                'CEFromCashFromSS': None,
+                                'CEFromCashAvailable': None,
+                            },
+                            {
+                                'PrdCode': self.prdcode,
+                                'AcctIDByMXZ': acctidbymxz_facct_src2,
+                                'NAV': na_facct_src2,
+                                'CPSLongAmt': None,
+                                'ICLots': iclots_src2,
+                                'CEFromCashFromSS': None,
+                                'CEFromCashAvailable': None,
+                            }
+
+                        ]
+                    self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_faccts
+
+            else:
+                acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T'}
+                )
+                dict_bgt_facct = {
+                    'PrdCode': self.prdcode,
+                    'AcctIDByMXZ': acctidbymxz_facct_trading,
+                    'NAV': na_faccts,
+                    'CPSLongAmt': None,
+                    'ICLots': iclots_total,
+                    'CEFromCashFromSS': None,
+                    'CEFromCashAvailable': None,
+                }
+                self.list_dicts_bgt_by_acctidbymxz.append(dict_bgt_facct)
+        else:
+            acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T'}
+            )
+            dict_bgt_facct = {
+                'PrdCode': self.prdcode,
+                'AcctIDByMXZ': acctidbymxz_facct_trading,
+                'NAV': na_faccts,
+                'CPSLongAmt': None,
+                'ICLots': iclots_total,
+                'CEFromCashFromSS': None,
+                'CEFromCashAvailable': None,
+            }
+            self.list_dicts_bgt_by_acctidbymxz.append(dict_bgt_facct)
+
     def budget(self):
         """
         假设：
@@ -314,8 +491,7 @@ class Product:
 
         """
         # 函数级 假设部分
-        index_future = 'IC'  # todo 可进一步抽象， 与空头策略有关
-        flt_cash2cpslongamt = 0.0889
+        index_future = self.gv.index_future  # todo 可进一步抽象， 与空头策略有关
         # # EI 策略现行假设
         ei_na_oaccts_tgt = 0
         ei_etflongamt_tgt = 0
@@ -325,13 +501,7 @@ class Product:
         ei_special_na = 0  # special na, 用于如人工T0/外部团队特殊情况的处理。
 
         dict_na_allocation = self.gv.col_na_allocation.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
-        prdna = self.prd_approximate_na
-        if self.dict_tgt_items:
-            if self.dict_tgt_items['NetAsset']:
-                prdna = self.dict_tgt_items['NetAsset']
-        ei_na_tgt = prdna * self.dict_strategies_allocation['EI']
-        mn_na_tgt = prdna * self.dict_strategies_allocation['MN']
-        list_dicts_bgt = []
+
         if dict_na_allocation:
             dict_na_allocation_saccts = dict_na_allocation['SecurityAccountsNetAssetAllocation']
             if dict_na_allocation_saccts:
@@ -342,24 +512,19 @@ class Product:
                 src2 = list_keys_na_allocation_saccts[1]
                 list_values_na_allocation_saccts = [dict_na_allocation_saccts[x]
                                                     for x in list_keys_na_allocation_saccts]
-                na_sum_tool = 0
-                for value_na_allocation_saccts in list_values_na_allocation_saccts:
+
+                # 注意，此处specified_na 是 分配到渠道对应证券户的净资产，而非渠道的净资产
+                specified_na_in_saccts = 0
+                idx_src = None
+                for idx, value_na_allocation_saccts in enumerate(list_values_na_allocation_saccts):
                     if isinstance(value_na_allocation_saccts, str):
                         pass
                     elif value_na_allocation_saccts > 1:
-                        na_sum_tool += value_na_allocation_saccts
+                        specified_na_in_saccts = value_na_allocation_saccts
+                        idx_src = idx
                     else:
                         continue
-                list_tgt_na_allocation = []
-                for value_na_allocation_saccts in list_values_na_allocation_saccts:
-                    if isinstance(value_na_allocation_saccts, str):
-                        tgt_na_allocation = prdna - na_sum_tool
-                    else:
-                        if value_na_allocation_saccts <= 1:
-                            tgt_na_allocation = prdna * value_na_allocation_saccts
-                        else:
-                            tgt_na_allocation = value_na_allocation_saccts
-                    list_tgt_na_allocation.append(tgt_na_allocation)
+
                 # 讨论渠道数为2个的情况
                 if len(dict_na_allocation_saccts) == 2:
                     # 假设：
@@ -389,14 +554,6 @@ class Product:
                     # 由于场外账户融券业务的会计规则未知，故先按照0处理
                     mn_security_debt_in_oaccts_src1 = 0
                     mn_security_debt_in_oaccts_src2 = 0
-
-                    # 已知量
-                    na_src1_tgt = list_tgt_na_allocation[0]
-                    na_src2_tgt = list_tgt_na_allocation[1]
-                    ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
-                    ei_na_src2_tgt = na_src2_tgt * self.dict_strategies_allocation['EI']
-                    mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
-                    mn_na_src2_tgt = na_src2_tgt * self.dict_strategies_allocation['MN']
 
                     # ## src1
                     dict_macct_basicinfo_src1 = self.gv.col_acctinfo.find_one(
@@ -550,21 +707,70 @@ class Product:
                         mn_approximate_na_oaccts_src2 = self.dict_tgt_items['NetAssetInOTCAccounts']
 
                     # 未知量
+                    # 注：未知量iclots不分src1与src2, 而采取代数式方式替换（基于facct的分配逻辑是”再分配独立“逻辑考虑）
+                    #    即： 对期指的分配跳过渠道分配的步骤（分配步骤： 渠道-策略-项目）
                     ei_cpslongamt_src1 = Symbol('ei_cpslongamt_src1', real=True, nonnegative=True)
-                    ei_iclots_src1 = Symbol('ei_iclots_src1', real=True)
                     ei_ce_from_cash_available_src1 = Symbol('ei_ce_from_cash_available_src1', real=True)
-                    mn_cpslongamt_src1 = Symbol('mn_cpslongamt_src1', real=True)
-                    mn_iclots_src1 = Symbol('mn_iclots_src1', real=True)
+                    mn_cpslongamt_src1 = Symbol('mn_cpslongamt_src1', real=True, nonnegative=True)
                     mn_ce_from_cash_available_src1 = Symbol('mn_ce_from_cash_available_src1', real=True,)
+                    na_src1_tgt = Symbol('na_src1_tgt', real=True, nonnegative=True)
 
                     ei_cpslongamt_src2 = Symbol('ei_cpslongamt_src2', real=True, nonnegative=True)
-                    ei_iclots_src2 = Symbol('ei_iclots_src2', real=True)
                     ei_ce_from_cash_available_src2 = Symbol('ei_ce_from_cash_available_src2', real=True)
-                    mn_cpslongamt_src2 = Symbol('mn_cpslongamt_src2', real=True)
-                    mn_iclots_src2 = Symbol('mn_iclots_src2', real=True)
+                    mn_cpslongamt_src2 = Symbol('mn_cpslongamt_src2', real=True, nonnegative=True)
                     mn_ce_from_cash_available_src2 = Symbol('mn_ce_from_cash_available_src2', real=True)
+                    na_src2_tgt = Symbol('na_src2_tgt', real=True, nonnegative=True)
+
+                    ei_iclots = Symbol('ei_iclots', real=True)
+                    mn_iclots = Symbol('mn_iclots', real=True)
 
                     list_eqs_2b_solved = []
+
+                    # 代数式
+                    ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
+                    ei_na_src2_tgt = na_src2_tgt * self.dict_strategies_allocation['EI']
+                    mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
+                    mn_na_src2_tgt = na_src2_tgt * self.dict_strategies_allocation['MN']
+
+                    if specified_na_in_saccts > 0:  # 定值算法
+                        # 代数式
+                        # 定值算法中，由于给定了单组证券账户的目标净资产，并没有给出期货户在各渠道的资产分配，以至于需要假设期货的资产分配方式
+                        # 如何假设呢，该假设是随意的，没有约束条件的假设
+                        # 假设：定值渠道的期货资产为0（仅保证有证券账户的即可）
+
+                        if idx_src == 0:
+                            ei_iclots_src1 = 0
+                            mn_iclots_src1 = 0
+                            ei_iclots_src2 = ei_iclots - ei_iclots_src1
+                            mn_iclots_src2 = mn_iclots - mn_iclots_src1
+                        elif idx_src == 1:
+                            ei_iclots_src2 = 0
+                            mn_iclots_src2 = 0
+                            ei_iclots_src1 = ei_iclots - ei_iclots_src2
+                            mn_iclots_src1 = mn_iclots - mn_iclots_src2
+                        else:
+                            raise ValueError('Unknown idx_src when get specified account index.')
+
+                    else:  # 定比算法
+                        list_tgt_na_allocation = []
+                        for value_na_allocation_saccts in list_values_na_allocation_saccts:
+                            tgt_na_allocation = self.prdna_tgt * value_na_allocation_saccts
+                            list_tgt_na_allocation.append(tgt_na_allocation)
+
+                        # 代数式：
+                        # 在多渠道且有货基的条件下，产品的各渠道的货基值，受各渠道分配到的期指数量影响
+                        # 如何假设呢，该假设是随意的，没有约束条件的假设
+                        # 假设： 分配比例为渠道比例(定比模式)
+
+                        ei_iclots_src1 = ei_iclots * list_values_na_allocation_saccts[0]
+                        ei_iclots_src2 = ei_iclots * list_values_na_allocation_saccts[1]
+                        mn_iclots_src1 = mn_iclots * list_values_na_allocation_saccts[0]
+                        mn_iclots_src2 = mn_iclots * list_values_na_allocation_saccts[1]
+
+                        eq_na_src1_tgt = na_src1_tgt - list_tgt_na_allocation[0]
+                        eq_na_src2_tgt = na_src2_tgt - list_tgt_na_allocation[1]
+                        list_eqs_2b_solved.append(eq_na_src1_tgt)
+                        list_eqs_2b_solved.append(eq_na_src2_tgt)
 
                     # 方程-双模式计算补充
                     if self.tgt_cpspct == 'max':
@@ -577,45 +783,146 @@ class Product:
                         list_eqs_2b_solved.append(eq_mn_ce_src1)
                         list_eqs_2b_solved.append(eq_mn_ce_src2)
                     else:
-                        eq_ei_cpslongamt_tgt = ei_cpslongamt_src1 + ei_cpslongamt_src2 - ei_na_tgt * self.tgt_cpspct
-                        eq_mn_cpslongamt_tgt = mn_cpslongamt_src1 + mn_cpslongamt_src2 - mn_na_tgt * self.tgt_cpspct
+                        eq_ei_cpslongamt_tgt = (ei_cpslongamt_src1
+                                                + ei_cpslongamt_src2
+                                                - self.ei_na_tgt * self.tgt_cpspct)
+                        eq_mn_cpslongamt_tgt = (mn_cpslongamt_src1
+                                                + mn_cpslongamt_src2
+                                                - self.mn_na_tgt * self.tgt_cpspct)
                         list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
                         list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
-                        # 当指定的仓位小于max仓位（未满仓）时，在满足产品仓位达标后，还需分配渠道 todo 假设： 分配比例为渠道比例
+                        if specified_na_in_saccts > 0:  # 定值算法补充方程
+                            # 由于目前对ei策略的cps与mn策略的cps不做区分，故对同一渠道下不同策略对应的cps的分配没有要求
+                            # todo 故暂且假设ei_cpslongamt_src1 与 mn_cpslongamt_src1 的比例为策略比例(EI:MN)
+                            # todo 即定值渠道中的ei_cpslongamt 与 mn_cpslongamt_sr1 为定值
+                            # todo 注意： 当定值渠道分配，策略分配同时出现时，算法不严谨，需要改进(非定值渠道可能出现负值）
+                            # todo 先填满定值渠道的权益
+                            # 定值算法中，由于给定了单组证券账户的目标净资产，并没有给出货币基金的值，需要分配。再解一次方程组
+                            # 如何假设呢，该假设是随意的，没有约束条件的假设
+                            # 假设：若产品需要的cpslongamt*1.0889小于指定证券账户的净资产，则，闲置资金买货基。另一账户中钱全部买货基
+                            # 假设：若产品需要的cpslongamt*1.0889大于指定证券账户的净资产，则，该账户中的货币资金为0，另一账户中为cps余额。
+                            if idx_src == 0:
+                                if self.prdna_tgt * self.tgt_cpspct > specified_na_in_saccts:
+                                    eq_ei_cpslongamt_allocation_src1 = (
+                                        ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+                                        - specified_na_in_saccts * self.dict_strategies_allocation['EI']
+                                    )
+                                    eq_mn_cpslongamt_allocation_src1 = (
+                                        mn_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+                                        - specified_na_in_saccts * self.dict_strategies_allocation['MN']
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src1)
+                                    list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src1)
 
-                        eq_ei_cpslongamt_allocation_src1 = (
-                            list_values_na_allocation_saccts[0] * (ei_cpslongamt_src1 + ei_cpslongamt_src2)
-                            - ei_cpslongamt_src1
-                        )
-                        eq_ei_cpslongamt_allocation_src2 = (
-                            list_values_na_allocation_saccts[1] * (ei_cpslongamt_src1 + ei_cpslongamt_src2)
-                            - ei_cpslongamt_src2
-                        )
-                        eq_mn_cpslongamt_allocation_src1 = (
-                            list_values_na_allocation_saccts[0] * (mn_cpslongamt_src1 + mn_cpslongamt_src2)
-                            - mn_cpslongamt_src1
-                        )
-                        eq_mn_cpslongamt_allocation_src2 = (
-                            list_values_na_allocation_saccts[1] * (mn_cpslongamt_src1 + mn_cpslongamt_src2)
-                            - mn_cpslongamt_src2
-                        )
-                        list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src1)
-                        list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src2)
-                        list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src1)
-                        list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src2)
+                                    eq_ei_ce_from_cash_available_src1 = ei_ce_from_cash_available_src1
+                                    eq_mn_ce_from_cash_available_src1 = mn_ce_from_cash_available_src1
+                                    list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src1)
+                                    list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src1)
+                                else:
+                                    eq_ei_cpslongamt_allocation_src1 = (
+                                        self.prdna_tgt
+                                        * self.gv.flt_cash2cpslongamt
+                                        * self.dict_strategies_allocation['EI']
+                                        - ei_cpslongamt_src1
+                                    )
+                                    eq_mn_cpslongamt_allocation_src1 = (
+                                        self.prdna_tgt
+                                        * self.gv.flt_cash2cpslongamt
+                                        * self.dict_strategies_allocation['MN']
+                                        - mn_cpsshortamt_src1
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src1)
+                                    list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src1)
+                                    ce_from_cash_available_src1 = (
+                                            specified_na_in_saccts - self.prdna_tgt * (1 + self.gv.flt_cash2cpslongamt)
+                                    )
+                                    eq_ei_ce_from_cash_available_src1 = (
+                                            ce_from_cash_available_src1 * self.dict_strategies_allocation['EI']
+                                            - ei_ce_from_cash_available_src1
+                                    )
+                                    eq_mn_ce_from_cash_available_src1 = (
+                                            ce_from_cash_available_src1 * self.dict_strategies_allocation['MN']
+                                            - mn_ce_from_cash_available_src1
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src1)
+                                    list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src1)
 
-                        # 在多渠道且有货基的条件下，产品的各渠道的货基值，受各渠道分配到的期指数量影响 todo 假设： 分配比例为渠道比例
-                        eq_ei_iclots_allocation = (list_values_na_allocation_saccts[1] * ei_iclots_src1
-                                                   - list_values_na_allocation_saccts[0] * ei_iclots_src2)
-                        eq_mn_iclots_allocation = (list_values_na_allocation_saccts[1] * mn_iclots_src1
-                                                   - list_values_na_allocation_saccts[0] * mn_iclots_src2)
-                        list_eqs_2b_solved.append(eq_ei_iclots_allocation)
-                        list_eqs_2b_solved.append(eq_mn_iclots_allocation)
+                            elif idx_src == 1:
+                                if self.prdna_tgt * self.tgt_cpspct > specified_na_in_saccts:
+                                    eq_ei_cpslongamt_allocation_src2 = (
+                                            ei_cpslongamt_src2 * (1 + self.gv.flt_cash2cpslongamt)
+                                            - specified_na_in_saccts * self.dict_strategies_allocation['EI']
+                                    )
+                                    eq_mn_cpslongamt_allocation_src2 = (
+                                            mn_cpslongamt_src2 * (1 + self.gv.flt_cash2cpslongamt)
+                                            - specified_na_in_saccts * self.dict_strategies_allocation['MN']
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src2)
+                                    list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src2)
 
-                    # 方程组-净资产
+                                    eq_ei_ce_from_cash_available_src2 = ei_ce_from_cash_available_src2
+                                    eq_mn_ce_from_cash_available_src2 = mn_ce_from_cash_available_src2
+                                    list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src2)
+                                    list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src2)
+                                else:
+                                    eq_ei_cpslongamt_allocation_src2 = (
+                                            self.prdna_tgt
+                                            * self.gv.flt_cash2cpslongamt
+                                            * self.dict_strategies_allocation['EI']
+                                            - ei_cpslongamt_src2
+                                    )
+                                    eq_mn_cpslongamt_allocation_src2 = (
+                                            self.prdna_tgt
+                                            * self.gv.flt_cash2cpslongamt
+                                            * self.dict_strategies_allocation['MN']
+                                            - mn_cpsshortamt_src2
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src2)
+                                    list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src2)
+                                    ce_from_cash_available_src2 = (
+                                            specified_na_in_saccts - self.prdna_tgt * (1 + self.gv.flt_cash2cpslongamt)
+                                    )
+                                    eq_ei_ce_from_cash_available_src2 = (
+                                            ce_from_cash_available_src2 * self.dict_strategies_allocation['EI']
+                                            - ei_ce_from_cash_available_src2
+                                    )
+                                    eq_mn_ce_from_cash_available_src2 = (
+                                            ce_from_cash_available_src2 * self.dict_strategies_allocation['MN']
+                                            - mn_ce_from_cash_available_src2
+                                    )
+                                    list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src2)
+                                    list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src2)
+                            else:
+                                raise ValueError('Unknown idx_src.')
+
+                        else:  # 定比方法补充方程
+                            # 在定比分配渠道算法下，当指定的仓位小于max仓位（未满仓）时，在满足产品仓位达标后，还需分配渠道
+                            # todo 假设： 分配比例为渠道比例
+                            eq_ei_cpslongamt_allocation_src1 = (
+                                list_values_na_allocation_saccts[0] * (ei_cpslongamt_src1 + ei_cpslongamt_src2)
+                                - ei_cpslongamt_src1
+                            )
+                            eq_ei_cpslongamt_allocation_src2 = (
+                                list_values_na_allocation_saccts[1] * (ei_cpslongamt_src1 + ei_cpslongamt_src2)
+                                - ei_cpslongamt_src2
+                            )
+                            eq_mn_cpslongamt_allocation_src1 = (
+                                list_values_na_allocation_saccts[0] * (mn_cpslongamt_src1 + mn_cpslongamt_src2)
+                                - mn_cpslongamt_src1
+                            )
+                            eq_mn_cpslongamt_allocation_src2 = (
+                                list_values_na_allocation_saccts[1] * (mn_cpslongamt_src1 + mn_cpslongamt_src2)
+                                - mn_cpslongamt_src2
+                                )
+                            list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src1)
+                            list_eqs_2b_solved.append(eq_ei_cpslongamt_allocation_src2)
+                            list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src1)
+                            list_eqs_2b_solved.append(eq_mn_cpslongamt_allocation_src2)
+
+                    # 核心方程组-净资产
                     eq_ei_na_src1 = (
-                            ei_cpslongamt_src1 * (1 + flt_cash2cpslongamt)
+                            ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                             + ei_ce_from_cash_available_src1
                             + ei_ce_from_ss_src1
                             + ei_etflongamt_src1
@@ -628,7 +935,7 @@ class Product:
                     )
 
                     eq_ei_na_src2 = (
-                            ei_cpslongamt_src2 * (1 + flt_cash2cpslongamt)
+                            ei_cpslongamt_src2 * (1 + self.gv.flt_cash2cpslongamt)
                             + ei_ce_from_cash_available_src2
                             + ei_ce_from_ss_src2
                             + ei_etflongamt_src2
@@ -643,7 +950,7 @@ class Product:
                     list_eqs_2b_solved.append(eq_ei_na_src2)
 
                     eq_mn_na_src1 = (
-                            mn_cpslongamt_src1 * (1 + flt_cash2cpslongamt)
+                            mn_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                             + mn_ce_from_cash_available_src1
                             + mn_ce_from_ss_src1
                             + mn_etflongamt_src1
@@ -658,7 +965,7 @@ class Product:
                     )
 
                     eq_mn_na_src2 = (
-                            mn_cpslongamt_src2 * (1 + flt_cash2cpslongamt)
+                            mn_cpslongamt_src2 * (1 + self.gv.flt_cash2cpslongamt)
                             + mn_ce_from_cash_available_src2
                             + mn_ce_from_ss_src2
                             + mn_etflongamt_src2
@@ -674,7 +981,7 @@ class Product:
                     list_eqs_2b_solved.append(eq_mn_na_src1)
                     list_eqs_2b_solved.append(eq_mn_na_src2)
 
-                    # 方程组-暴露
+                    # 核心方程组-暴露
                     eq_ei_exposure = (
                             ei_cpslongamt_src1
                             + ei_etflongamt_src1
@@ -690,7 +997,7 @@ class Product:
                             - ei_etfshortamt_src2
                             + ei_net_exposure_from_oaccts_src2
 
-                            - ei_na_tgt * 0.99
+                            - self.ei_na_tgt * 0.99
                                       )
                     list_eqs_2b_solved.append(eq_ei_exposure)
 
@@ -711,31 +1018,28 @@ class Product:
                     )
                     list_eqs_2b_solved.append(eq_mn_exposure)
 
-                    # 解方程
+                    # 解核心方程组
                     list_tuples_eqs_solve = solve(list_eqs_2b_solved,
-                                                  ei_cpslongamt_src1, ei_iclots_src1, ei_ce_from_cash_available_src1,
-                                                  mn_cpslongamt_src1, mn_iclots_src1, mn_ce_from_cash_available_src1,
-                                                  ei_cpslongamt_src2, ei_iclots_src2, ei_ce_from_cash_available_src2,
-                                                  mn_cpslongamt_src2, mn_iclots_src2, mn_ce_from_cash_available_src2,)
+                                                  ei_cpslongamt_src1, ei_ce_from_cash_available_src1,
+                                                  mn_cpslongamt_src1, mn_ce_from_cash_available_src1,
+                                                  na_src1_tgt,
+                                                  ei_cpslongamt_src2, ei_ce_from_cash_available_src2,
+                                                  mn_cpslongamt_src2, mn_ce_from_cash_available_src2,
+                                                  na_src2_tgt, ei_iclots, mn_iclots)
                     tuple_eqs_solve = list_tuples_eqs_solve[0]
-                    ei_cpslongamt_src1 = tuple_eqs_solve[0]
-                    ei_iclots_src1 = tuple_eqs_solve[1]
-                    ei_ce_from_cash_available_src1 = tuple_eqs_solve[2]
-                    mn_cpslongamt_src1 = tuple_eqs_solve[3]
-                    mn_iclots_src1 = tuple_eqs_solve[4]
-                    mn_ce_from_cash_available_src1 = tuple_eqs_solve[5]
-                    ei_cpslongamt_src2 = tuple_eqs_solve[6]
-                    ei_iclots_src2 = tuple_eqs_solve[7]
-                    ei_ce_from_cash_available_src2 = tuple_eqs_solve[8]
-                    mn_cpslongamt_src2 = tuple_eqs_solve[9]
-                    mn_iclots_src2 = tuple_eqs_solve[10]
-                    mn_ce_from_cash_available_src2 = tuple_eqs_solve[11]
+                    ei_cpslongamt_src1 = float(tuple_eqs_solve[0])
+                    ei_ce_from_cash_available_src1 = float(tuple_eqs_solve[1])
+                    mn_cpslongamt_src1 = float(tuple_eqs_solve[2])
+                    mn_ce_from_cash_available_src1 = float(tuple_eqs_solve[3])
+                    ei_cpslongamt_src2 = float(tuple_eqs_solve[5])
+                    ei_ce_from_cash_available_src2 = float(tuple_eqs_solve[6])
+                    mn_cpslongamt_src2 = float(tuple_eqs_solve[7])
+                    mn_ce_from_cash_available_src2 = float(tuple_eqs_solve[8])
+                    ei_iclots = float(tuple_eqs_solve[10])
+                    mn_iclots = float(tuple_eqs_solve[11])
 
-                    iclots_total = (int(ei_iclots_src1)
-                                    + int(ei_iclots_src2)
-                                    + round(mn_iclots_src1)
-                                    + round(mn_iclots_src2))
-                    na_faccts = iclots_total * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
+                    iclots_total = int(ei_iclots) + round(mn_iclots)
+                    na_faccts = abs(iclots_total) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
                     cpslongamt_src1 = ei_cpslongamt_src1 + mn_cpslongamt_src1
                     cpslongamt_src2 = ei_cpslongamt_src2 + mn_cpslongamt_src2
                     ce_from_cash_available_src1 = ei_ce_from_cash_available_src1 + mn_ce_from_cash_available_src1
@@ -786,26 +1090,26 @@ class Product:
                         idx_capital_source = list_keys_na_allocation_saccts.index(capital_source)
                         if idx_capital_source == 0:
                             cpslongamt_in_macct_src1 = cpslongamt_src1
-                            cash_available_in_macct_src1 = cpslongamt_src1 * flt_cash2cpslongamt
+                            cash_available_in_macct_src1 = cpslongamt_src1 * self.gv.flt_cash2cpslongamt
                             na_cacct_src1 = ce_from_cash_available_src1
                             na_macct_src1 = cpslongamt_in_macct_src1 + cash_available_in_macct_src1
                             cpslongamt_in_cacct_src1 = 0
-                            if na_cacct_src1 > 2000000:
-                                ce_in_cacct_src1 = na_cacct_src1 - 2000000
-                                cash_available_in_cacct_src1 = 2000000
+                            if na_cacct_src1 > 2500000:
+                                ce_in_cacct_src1 = na_cacct_src1 - 2500000
+                                cash_available_in_cacct_src1 = 2500000
                             else:
                                 ce_in_cacct_src1 = 0
                                 cash_available_in_cacct_src1 = na_cacct_src1
 
                         elif idx_capital_source == 1:
                             cpslongamt_in_macct_src2 = cpslongamt_src2
-                            cash_available_in_macct_src2 = cpslongamt_src2 * flt_cash2cpslongamt
+                            cash_available_in_macct_src2 = cpslongamt_src2 * self.gv.flt_cash2cpslongamt
                             na_cacct_src2 = ce_from_cash_available_src2
                             na_macct_src2 = cpslongamt_in_macct_src2 + cash_available_in_macct_src2
                             cpslongamt_in_cacct_src2 = 0
-                            if na_cacct_src2 > 2000000:
-                                ce_in_cacct_src2 = na_cacct_src2 - 2000000
-                                cash_available_in_cacct_src2 = 2000000
+                            if na_cacct_src2 > 2500000:
+                                ce_in_cacct_src2 = na_cacct_src2 - 2500000
+                                cash_available_in_cacct_src2 = 2500000
                             else:
                                 ce_in_cacct_src2 = 0
                                 cash_available_in_cacct_src2 = na_cacct_src2
@@ -817,8 +1121,8 @@ class Product:
                         cpslongamt_in_cacct_src2 = cpslongamt_src2
                         ce_in_cacct_src1 = ce_from_cash_available_src1
                         ce_in_cacct_src2 = ce_from_cash_available_src2
-                        cash_available_in_cacct_src1 = cpslongamt_in_cacct_src1 * flt_cash2cpslongamt
-                        cash_available_in_cacct_src2 = cpslongamt_in_cacct_src2 * flt_cash2cpslongamt
+                        cash_available_in_cacct_src1 = cpslongamt_in_cacct_src1 * self.gv.flt_cash2cpslongamt
+                        cash_available_in_cacct_src2 = cpslongamt_in_cacct_src2 * self.gv.flt_cash2cpslongamt
                         na_cacct_src1 = cpslongamt_src1 + ce_in_cacct_src1 + cash_available_in_cacct_src1
                         na_cacct_src2 = cpslongamt_src2 + ce_in_cacct_src2 + cash_available_in_cacct_src2
 
@@ -826,7 +1130,7 @@ class Product:
                         {
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_cacct_src1,
-                            'NA': na_cacct_src1,
+                            'NAV': na_cacct_src1,
                             'CPSLongAmt': cpslongamt_in_cacct_src1,
                             'ICLots': None,
                             'CashAvailable': cash_available_in_cacct_src1,
@@ -836,7 +1140,7 @@ class Product:
                         {
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_macct_src1,
-                            'NA': na_macct_src1,
+                            'NAV': na_macct_src1,
                             'CPSLongAmt': cpslongamt_in_macct_src1,
                             'ICLots': None,
                             'CashAvailable': cash_available_in_macct_src1,
@@ -846,7 +1150,7 @@ class Product:
                         {
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_cacct_src2,
-                            'NA': na_cacct_src2,
+                            'NAV': na_cacct_src2,
                             'CPSLongAmt': cpslongamt_in_cacct_src2,
                             'ICLots': None,
                             'CashAvailable': cash_available_in_cacct_src2,
@@ -856,490 +1160,303 @@ class Product:
                         {
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_macct_src2,
-                            'NA': na_macct_src2,
+                            'NAV': na_macct_src2,
                             'CPSLongAmt': cpslongamt_in_macct_src2,
                             'ICLots': None,
                             'CashAvailable': cash_available_in_macct_src2,
                             'CEFromCashFromSS': ce_from_cash_from_ss_src2,
                             'CEFromCashAvailable': ce_from_cash_available_in_macct_src2,
                         },
+                        {
+                            'PrdCode': self.prdcode,
+                            'AcctIDByMXZ': 'faccts',
+                            'NAV': na_faccts,
+                            'CPSLongAmt': None,
+                            'ICLots': iclots_total,
+                            'CEFromCashFromSS': None,
+                            'CEFromCashAvailable': None,
+                        }
                     ]
-                    list_dicts_bgt += list_dicts_bgt_secaccts
+                    self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_secaccts
+                    self.allocate_faccts(iclots_total)
+            else:
+                self.get_bgt_without_na_allocation()
+        else:
+            self.get_bgt_without_na_allocation()
 
-                    # todo 当渠道有两个时，分配期货账户中的资金和仓位。
+        self.gv.col_bgt_by_acctidbymxz.delete_many(
+            {'PrdCode': self.prdcode, 'DataDate': self.gv.str_today, }
+        )
+        if self.list_dicts_bgt_by_acctidbymxz:
+            self.gv.col_bgt_by_acctidbymxz.insert_many(self.list_dicts_bgt_by_acctidbymxz)
 
-                    dict_na_allocation_faccts = dict_na_allocation['FutureAccountsNetAssetAllocation']
-                    if dict_na_allocation_faccts:
-                        pass
+    def get_bgt_without_na_allocation(self):
+        """单渠道算法"""
+        # 假设：
+        ei_etflongamt_src1 = 0
+        ei_na_oaccts_src1 = 0
+        ei_capital_debt_src1 = 0
+        ei_liability_src1 = 0
+        ei_special_na_src1 = 0
+        ei_cpsshortamt_src1 = 0
+        ei_etfshortamt_src1 = 0
+        ei_net_exposure_from_oaccts_src1 = 0
+        ei_ce_from_ss_src1 = 0
 
+        mn_etflongamt_src1 = 0
+        mn_special_na_src1 = 0
+        # 由于场外账户融券业务的会计规则未知，故先按照0处理
+        mn_security_debt_in_oaccts_src1 = 0
 
+        # ## src1
+        dict_macct_basicinfo_src1 = self.gv.col_acctinfo.find_one(
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
+        )
+        mn_cash_from_ss_src1 = 0
+        mn_etfshortamt_src1 = 0
+        mn_cpsshortamt_src1 = 0
+        mn_capital_debt_in_macct_src1 = 0
+        mn_security_debt_in_macct_src1 = 0
+        if dict_macct_basicinfo_src1:
+            acctidbymxz_macct_src1 = dict_macct_basicinfo_src1['AcctIDByMXZ']
 
+            dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
+            )
+            mn_capital_debt_in_macct_src1 = dict_bs_by_acctidbymxz['CapitalDebt']
+            mn_security_debt_in_macct_src1 = (dict_bs_by_acctidbymxz['CompositeShortAmt']
+                                              + dict_bs_by_acctidbymxz['ETFShortAmt'])
+            list_dicts_formatted_holding = self.gv.col_formatted_holding.find(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
+            )
 
+            # todo 更新，在b/s中有分拆，不用重新累加， 需要在b/s表中添加卖出融券所得资金, 此处可改进
+            for dict_formatted_holding in list_dicts_formatted_holding:
+                sectype = dict_formatted_holding['SecurityType']
+                mn_cash_from_ss_delta = dict_formatted_holding['CashFromShortSelling']
+                mn_cash_from_ss_src1 += mn_cash_from_ss_delta
+                if sectype in ['ETF']:
+                    mn_etfshortamt_delta = dict_formatted_holding['ShortAmt']
+                    mn_etfshortamt_src1 += mn_etfshortamt_delta
+                elif sectype in ['CS']:
+                    mn_cpsshortamt_delta = dict_formatted_holding['ShortAmt']
+                    mn_cpsshortamt_src1 += mn_cpsshortamt_delta
+                else:
+                    ValueError('Unknown security type when computing mn_etfshortamt_macct '
+                               'and mn_cpsshortamt_in_macct')
+            if self.dict_tgt_items['CashFromShortSellingInMarginAccount']:
+                mn_cash_from_ss_src1 = self.dict_tgt_items['CashFromShortSellingInMarginAccount']
+            if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
+                mn_etfshortamt_src1 = self.dict_tgt_items['ETFShortAmountInMarginAccount']
+            if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
+                mn_cpsshortamt_src1 = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
 
+        mn_ce_from_ss_src1 = mn_cash_from_ss_src1
 
+        # 求oacct提供的空头暴露预算值与多头暴露预算值
+        # 求oacct账户中的存出保证金（net_asset）
+        # ## src1
+        list_dicts_oacct_basicinfo_src1 = list(
+            self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode,
+                                       'AcctType': 'o', 'CapitalSource': src1})
+        )
+        mn_net_exposure_from_oaccts_src1 = 0
+        mn_approximate_na_oaccts_src1 = 0
+        mn_capital_debt_in_oaccts_src1 = 0
+        for dict_oacct_basicinfo_src1 in list_dicts_oacct_basicinfo_src1:
+            if dict_oacct_basicinfo_src1:
+                acctidbymxz_oacct = dict_oacct_basicinfo_src1['AcctIDByMXZ']
+                dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
+                )
+                net_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['NetExposure']
+                mn_net_exposure_from_oaccts_src1 += net_exposure_from_oacct_delta
+                dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
+                )
+                approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+                mn_approximate_na_oaccts_src1 += approximate_na_oacct_delta
+                mn_capital_debt_in_oaccts_delta = dict_bs_by_acctidbymxz['CapitalDebt']
+                mn_capital_debt_in_oaccts_src1 += mn_capital_debt_in_oaccts_delta
 
+        if self.dict_tgt_items['NetExposureFromOTCAccounts']:
+            mn_net_exposure_from_oaccts_src1 = self.dict_tgt_items['NetExposureFromOTCAccounts']
+        if self.dict_tgt_items['NetAssetInOTCAccounts']:
+            mn_approximate_na_oaccts_src1 = self.dict_tgt_items['NetAssetInOTCAccounts']
 
+        # 未知量
+        ei_cpslongamt_src1 = Symbol('ei_cpslongamt_src1', real=True, nonnegative=True)
+        ei_ce_from_cash_available_src1 = Symbol('ei_ce_from_cash_available_src1', real=True)
+        mn_cpslongamt_src1 = Symbol('mn_cpslongamt_src1', real=True, nonnegative=True)
+        mn_ce_from_cash_available_src1 = Symbol('mn_ce_from_cash_available_src1', real=True, )
+        na_src1_tgt = Symbol('na_src1_tgt', real=True, nonnegative=True)
+        ei_iclots_src1 = Symbol('ei_iclots_src1', real=True)
+        mn_iclots_src1 = Symbol('mn_iclots_src1', real=True)
+        list_eqs_2b_solved = []
 
+        # 代数式
+        ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
+        mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
 
+        # 方程-双模式计算补充
+        if self.tgt_cpspct == 'max':
+            eq_ei_ce_src1 = ei_ce_from_cash_available_src1
+            eq_mn_ce_src1 = mn_ce_from_cash_available_src1
+            list_eqs_2b_solved.append(eq_ei_ce_src1)
+            list_eqs_2b_solved.append(eq_mn_ce_src1)
+        else:
+            eq_ei_cpslongamt_tgt = (ei_cpslongamt_src1 - self.ei_na_tgt * self.tgt_cpspct)
+            eq_mn_cpslongamt_tgt = (mn_cpslongamt_src1 - self.mn_na_tgt * self.tgt_cpspct)
+            list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
+            list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
+
+        # 核心方程组-净资产
+        eq_ei_na_src1 = (
+                ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+                + ei_ce_from_cash_available_src1
+                + ei_ce_from_ss_src1
+                + ei_etflongamt_src1
+                + ei_special_na_src1
+                + abs(ei_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
+                + ei_na_oaccts_src1
+                + ei_capital_debt_src1
+                - ei_na_src1_tgt
+                - ei_liability_src1
+        )
+        list_eqs_2b_solved.append(eq_ei_na_src1)
+
+        eq_mn_na_src1 = (
+                mn_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+                + mn_ce_from_cash_available_src1
+                + mn_ce_from_ss_src1
+                + mn_etflongamt_src1
+                + mn_special_na_src1
+                + abs(mn_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
+                + mn_approximate_na_oaccts_src1
+                - mn_na_src1_tgt
+                - mn_capital_debt_in_macct_src1
+                - mn_capital_debt_in_oaccts_src1
+                - mn_security_debt_in_macct_src1
+                - mn_security_debt_in_oaccts_src1
+        )
+        list_eqs_2b_solved.append(eq_mn_na_src1)
+
+        # 核心方程组-暴露
+        eq_ei_exposure = (
+                ei_cpslongamt_src1
+                + ei_etflongamt_src1
+                + ei_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
+                - ei_cpsshortamt_src1
+                - ei_etfshortamt_src1
+                + ei_net_exposure_from_oaccts_src1
+                - self.ei_na_tgt * 0.99
+        )
+        list_eqs_2b_solved.append(eq_ei_exposure)
+
+        eq_mn_exposure = (
+                mn_cpslongamt_src1
+                + mn_etflongamt_src1
+                + mn_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
+                - mn_cpsshortamt_src1
+                - mn_etfshortamt_src1
+                + mn_net_exposure_from_oaccts_src1
+        )
+        list_eqs_2b_solved.append(eq_mn_exposure)
+
+        # 解核心方程组
+        list_tuples_eqs_solve = solve(list_eqs_2b_solved,
+                                      ei_cpslongamt_src1, ei_ce_from_cash_available_src1,
+                                      mn_cpslongamt_src1, mn_ce_from_cash_available_src1,
+                                      na_src1_tgt, ei_iclots_src1, mn_iclots_src1)
+        tuple_eqs_solve = list_tuples_eqs_solve[0]
+        ei_cpslongamt_src1 = float(tuple_eqs_solve[0])
+        ei_ce_from_cash_available_src1 = float(tuple_eqs_solve[1])
+        mn_cpslongamt_src1 = float(tuple_eqs_solve[2])
+        mn_ce_from_cash_available_src1 = float(tuple_eqs_solve[3])
+        ei_iclots_src1 = float(tuple_eqs_solve[5])
+        mn_iclots_src1 = float(tuple_eqs_solve[6])
+        iclots_total = int(ei_iclots_src1) + round(mn_iclots_src1)
+        na_faccts = abs(iclots_total) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
+        cpslongamt_src1 = ei_cpslongamt_src1 + mn_cpslongamt_src1
+        ce_from_cash_available_src1 = ei_ce_from_cash_available_src1 + mn_ce_from_cash_available_src1
+
+        # 资金分配(cacct 与 macct)
+        # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
+        acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
+            {'PrdCode': self.prdcode, 'AcctType': 'c'}
+        )['AcctIDByMXZ']
+        acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
+            {'PrdCode': self.prdcode, 'AcctType': 'm'}
+        )
+
+        na_cacct_src1 = 0
+        cpslongamt_in_cacct_src1 = 0
+        cash_available_in_cacct_src1 = 0
+        ce_in_cacct_src1 = 0
+
+        cpslongamt_in_macct_src1 = None
+        na_macct_src1 = None
+        cash_available_in_macct_src1 = None
+        # todo 此处假设： 若macct中不满仓，则可用于交易的现金对应的货基应全部转至cacct，故macct中ce_from_cash_available为0
+        ce_from_cash_available_in_macct_src1 = 0
+        ce_from_cash_from_ss_src1 = mn_ce_from_ss_src1
+
+        # todo 如有信用户，则”应该“该渠道按照最少净资产原则放在信用户里交易（还未做成）
+        dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
+            {'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1, 'SpecialAccountMark': 0}
+        )
+        if dict_macct_basicinfo:
+            cpslongamt_in_macct_src1 = cpslongamt_src1
+            cash_available_in_macct_src1 = cpslongamt_src1 * self.gv.flt_cash2cpslongamt
+            na_cacct_src1 = ce_from_cash_available_src1
+            na_macct_src1 = cpslongamt_in_macct_src1 + cash_available_in_macct_src1
+            cpslongamt_in_cacct_src1 = 0
+            if na_cacct_src1 > 2500000:
+                ce_in_cacct_src1 = na_cacct_src1 - 2500000
+                cash_available_in_cacct_src1 = 2500000
+            else:
+                ce_in_cacct_src1 = 0
+                cash_available_in_cacct_src1 = na_cacct_src1
 
         else:
-            # 单渠道算法（无na_allocation: 仅有src1）
-            # 假设：
-            ei_etflongamt_src1 = 0
-            ei_na_oaccts_src1 = 0
-            ei_capital_debt_src1 = 0
-            ei_liability_src1 = 0
-            ei_special_na_src1 = 0
-            ei_cpsshortamt_src1 = 0
-            ei_etfshortamt_src1 = 0
-            ei_net_exposure_from_oaccts_src1 = 0
-            ei_ce_from_ss_src1 = 0
+            cpslongamt_in_cacct_src1 = cpslongamt_src1
+            ce_in_cacct_src1 = ce_from_cash_available_src1
+            cash_available_in_cacct_src1 = cpslongamt_in_cacct_src1 * self.gv.flt_cash2cpslongamt
+            na_cacct_src1 = cpslongamt_src1 + ce_in_cacct_src1 + cash_available_in_cacct_src1
 
-            mn_etflongamt_src1 = 0
-            mn_special_na_src1 = 0
-            mn_security_debt_in_oaccts_src1 = 0  # todo 由于场外账户融券业务的会计规则未知，故先按照0处理
-
-            # 已知量
-            na_src1_tgt = self.prd_approximate_na
-            ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
-            mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
-
-            # macct
-            dict_macct_basicinfo_src1 = self.gv.col_acctinfo.find_one(
-                {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
-            )
-            mn_cash_from_ss_src1 = 0
-            mn_etfshortamt_src1 = 0
-            mn_cpsshortamt_src1 = 0
-            mn_capital_debt_in_macct_src1 = 0
-            mn_security_debt_in_macct_src1 = 0
-            if dict_macct_basicinfo_src1:
-                acctidbymxz_macct_src1 = dict_macct_basicinfo_src1['AcctIDByMXZ']
-
-                dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
-                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
-                )
-                mn_capital_debt_in_macct_src1 = dict_bs_by_acctidbymxz['CapitalDebt']
-                mn_security_debt_in_macct_src1 = (dict_bs_by_acctidbymxz['CompositeShortAmt']
-                                                  + dict_bs_by_acctidbymxz['ETFShortAmt'])
-                list_dicts_formatted_holding = self.gv.col_formatted_holding.find(
-                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
-                )
-
-                # todo 更新，在b/s中有分拆，不用重新累加， 需要在b/s表中添加卖出融券所得资金, 此处可改进
-                for dict_formatted_holding in list_dicts_formatted_holding:
-                    sectype = dict_formatted_holding['SecurityType']
-                    mn_cash_from_ss_delta = dict_formatted_holding['CashFromShortSelling']
-                    mn_cash_from_ss_src1 += mn_cash_from_ss_delta
-                    if sectype in ['ETF']:
-                        mn_etfshortamt_delta = dict_formatted_holding['ShortAmt']
-                        mn_etfshortamt_src1 += mn_etfshortamt_delta
-                    elif sectype in ['CS']:
-                        mn_cpsshortamt_delta = dict_formatted_holding['ShortAmt']
-                        mn_cpsshortamt_src1 += mn_cpsshortamt_delta
-                    else:
-                        ValueError('Unknown security type when computing mn_etfshortamt_macct '
-                                   'and mn_cpsshortamt_in_macct')
-                if self.dict_tgt_items['CashFromShortSellingInMarginAccount']:
-                    mn_cash_from_ss_src1 = self.dict_tgt_items['CashFromShortSellingInMarginAccount']
-                if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
-                    mn_etfshortamt_src1 = self.dict_tgt_items['ETFShortAmountInMarginAccount']
-                if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
-                    mn_cpsshortamt_src1 = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
-            mn_ce_from_ss_src1 = mn_cash_from_ss_src1
-
-            # oacct
-            list_dicts_oacct_basicinfo_src1 = list(
-                self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o',})
-            )
-            mn_net_exposure_from_oaccts_src1 = 0
-            mn_approximate_na_oaccts_src1 = 0
-            mn_capital_debt_in_oaccts_src1 = 0
-            for dict_oacct_basicinfo_src1 in list_dicts_oacct_basicinfo_src1:
-                if dict_oacct_basicinfo_src1:
-                    acctidbymxz_oacct = dict_oacct_basicinfo_src1['AcctIDByMXZ']
-                    dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
-                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
-                    )
-                    net_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['NetExposure']
-                    mn_net_exposure_from_oaccts_src1 += net_exposure_from_oacct_delta
-                    dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
-                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
-                    )
-                    approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
-                    mn_approximate_na_oaccts_src1 += approximate_na_oacct_delta
-                    mn_capital_debt_in_oaccts_delta = dict_bs_by_acctidbymxz['CapitalDebt']
-                    mn_capital_debt_in_oaccts_src1 += mn_capital_debt_in_oaccts_delta
-
-            if self.dict_tgt_items['NetExposureFromOTCAccounts']:
-                mn_net_exposure_from_oaccts_src1 = self.dict_tgt_items['NetExposureFromOTCAccounts']
-            if self.dict_tgt_items['NetAssetInOTCAccounts']:
-                mn_approximate_na_oaccts_src1 = self.dict_tgt_items['NetAssetInOTCAccounts']
-
-            # 未知量
-            ei_cpslongamt_src1 = Symbol('ei_cpslongamt_src1', real=True)
-            ei_iclots_src1 = Symbol('ei_iclots_src1', real=True)
-            ei_ce_from_cash_available_src1 = Symbol('ei_ce_from_cash_available_src1', real=True)
-            mn_cpslongamt_src1 = Symbol('mn_cpslongamt_src1', real=True)
-            mn_iclots_src1 = Symbol('mn_iclots_src1', real=True)
-            mn_ce_from_cash_available_src1 = Symbol('mn_ce_from_cash_available_src1', real=True, )
-
-            list_eqs_2b_solved = []
-
-            # 方程-双模式计算补充
-            if self.tgt_cpspct == 'max':
-                eq_ei_ce_src1 = ei_ce_from_cash_available_src1
-                eq_mn_ce_src1 = mn_ce_from_cash_available_src1
-                list_eqs_2b_solved.append(eq_ei_ce_src1)
-                list_eqs_2b_solved.append(eq_mn_ce_src1)
-            else:
-                eq_ei_cpslongamt_tgt = ei_cpslongamt_src1 - ei_na_tgt * self.tgt_cpspct
-                eq_mn_cpslongamt_tgt = mn_cpslongamt_src1 - mn_na_tgt * self.tgt_cpspct
-                list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
-                list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
-
-            # 方程组-净资产
-            eq_ei_na_src1 = (
-                    ei_cpslongamt_src1 * (1 + flt_cash2cpslongamt)
-                    + ei_ce_from_cash_available_src1
-                    + ei_ce_from_ss_src1
-                    + ei_etflongamt_src1
-                    + ei_special_na_src1
-                    + abs(ei_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-                    + ei_na_oaccts_src1
-                    + ei_capital_debt_src1
-                    - ei_na_src1_tgt
-                    - ei_liability_src1
-            )
-
-            list_eqs_2b_solved.append(eq_ei_na_src1)
-
-            eq_mn_na_src1 = (
-                    mn_cpslongamt_src1 * (1 + flt_cash2cpslongamt)
-                    + mn_ce_from_cash_available_src1
-                    + mn_ce_from_ss_src1
-                    + mn_etflongamt_src1
-                    + mn_special_na_src1
-                    + abs(mn_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-                    + mn_approximate_na_oaccts_src1
-                    - mn_na_src1_tgt
-                    - mn_capital_debt_in_macct_src1
-                    - mn_capital_debt_in_oaccts_src1
-                    - mn_security_debt_in_macct_src1
-                    - mn_security_debt_in_oaccts_src1
-            )
-            list_eqs_2b_solved.append(eq_mn_na_src1)
-
-            # 方程组-暴露
-            eq_ei_exposure = (
-                    ei_cpslongamt_src1
-                    + ei_etflongamt_src1
-                    + ei_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
-                    - ei_cpsshortamt_src1
-                    - ei_etfshortamt_src1
-                    + ei_net_exposure_from_oaccts_src1
-                    - ei_na_tgt * 0.99
-            )
-            list_eqs_2b_solved.append(eq_ei_exposure)
-
-            eq_mn_exposure = (
-                    mn_cpslongamt_src1
-                    + mn_etflongamt_src1
-                    + mn_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
-                    - mn_cpsshortamt_src1
-                    - mn_etfshortamt_src1
-                    + mn_net_exposure_from_oaccts_src1
-            )
-            list_eqs_2b_solved.append(eq_mn_exposure)
-
-            # 解方程
-            fs_eqs_solve = nonlinsolve(list_eqs_2b_solved,
-                                       ei_cpslongamt_src1, ei_iclots_src1, ei_ce_from_cash_available_src1,
-                                       mn_cpslongamt_src1, mn_iclots_src1, mn_ce_from_cash_available_src1
-                                       )
-            tuple_eqs_solve = fs_eqs_solve.args[0]
-            ei_cpslongamt_src1 = tuple_eqs_solve[0]
-            ei_iclots_src1 = tuple_eqs_solve[1]
-            ei_ce_from_cash_available_src1 = tuple_eqs_solve[2]
-            mn_cpslongamt_src1 = tuple_eqs_solve[3]
-            mn_iclots_src1 = tuple_eqs_solve[4]
-            mn_ce_from_cash_available_src1 = tuple_eqs_solve[5]
-
-            iclots_total = int(ei_iclots_src1) + round(mn_iclots_src1)
-            cpslongamt_src1 = ei_cpslongamt_src1 + mn_cpslongamt_src1
-            ce_from_cash_available_src1 = ei_ce_from_cash_available_src1 + mn_ce_from_cash_available_src1
-            print('solve the equation')
-
-
-            # # 参数部分 与 假设
-            # index_future = 'IC'  # todo 可进一步抽象， 与空头策略有关
-            #
-            # # EI 策略预算假设
-            # ei_na_oaccts_tgt = 0
-            # ei_etflongamt_tgt = 0
-            # ei_cpsshortamt_tgt = 0
-            # ei_etfshortamt_tgt = 0
-            # ei_net_exposure_in_oaccts = 0
-            #
-            # # special na, 用于如人工T0/外部团队特殊情况的处理。
-            # ei_special_na = 0
-            # tgt_na = self.prd_approximate_na
-            # if self.dict_tgt_items:
-            #     if self.dict_tgt_items['NetAsset']:
-            #         tgt_na = self.dict_tgt_items['NetAsset']
-            #
-            # ei_na_tgt = tgt_na * self.dict_strategies_allocation['EI']
-            # if self.tgt_cpspct == 'max':
-            #     ei_ce_in_saccts_tgt = 0
-            #     ei_cpslongamt_tgt = Symbol('ei_cpslongamt_tgt')
-            # else:
-            #     ei_ce_in_saccts_tgt = Symbol('ei_ce_in_saccts_tgt')
-            #     ei_cpslongamt_tgt = ei_na_tgt * self.tgt_cpspct
-            #
-            # # 方程部分
-            # ei_iclots_tgt = Symbol('ei_iclots_tgt')
-            # eq_ei_na = (ei_cpslongamt_tgt * (1 + flt_cash2cpslongamt)
-            #             + ei_ce_in_saccts_tgt
-            #             + ei_etflongamt_tgt
-            #             + ei_special_na
-            #             + ei_iclots_tgt * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-            #             + ei_na_oaccts_tgt
-            #             - ei_na_tgt
-            #             )
-            # eq_ei_exposure = (ei_cpslongamt_tgt
-            #                   + ei_etflongamt_tgt
-            #                   + ei_iclots_tgt * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
-            #                   - ei_cpsshortamt_tgt
-            #                   - ei_etfshortamt_tgt
-            #                   + ei_net_exposure_in_oaccts
-            #                   - ei_na_tgt * 0.99
-            # )
-            # # 2. MN策略
-            # # todo 20200704需要分析两融户中换仓资金的准确算法， 即 保证金制度交易下的详细算法（大课题）。
-            #
-            # # MN 假设：
-            # mn_etflongamt_tgt = 0
-            # mn_special_na = 0
-            #
-            # # 方程部分
-            # # 未知
-            # mn_iclots_tgt = Symbol('mn_iclots_tgt')
-            #
-            # # 已知
-            # mn_na_tgt = tgt_na * self.dict_strategies_allocation['MN']
-            # if self.tgt_cpspct == 'max':
-            #     mn_ce_from_cash_available = 0
-            #     mn_cpslongamt_tgt = Symbol('mn_cpslongamt_tgt')
-            # else:
-            #     mn_cpslongamt_tgt = mn_na_tgt * self.tgt_cpspct
-            #     mn_ce_from_cash_available = Symbol('mn_ce_from_cash_available')
-            #
-            # # 求信用户提供的空头暴露预算值
-            # # 求信用户中的卖出融券所得资金
-            # # 假设：信用户提供的空头暴露工具只有 etf 和 cps(个股)
-            # dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-            #     {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
-            # )
-            # mn_etfshortamt_in_macct = 0
-            # mn_cpsshortamt_in_macct = 0
-            # mn_cash_from_ss_in_macct = 0
-            # if dict_macct_basicinfo:
-            #     acctidbymxz_macct = dict_macct_basicinfo['AcctIDByMXZ']
-            #     list_dicts_formatted_holding = self.gv.col_formatted_holding.find(
-            #         {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct}
-            #     )
-            #     for dict_formatted_holding in list_dicts_formatted_holding:
-            #         sectype = dict_formatted_holding['SecurityType']
-            #         mn_cash_from_ss_delta = dict_formatted_holding['CashFromShortSelling']
-            #         mn_cash_from_ss_in_macct += mn_cash_from_ss_delta
-            #         if sectype in ['ETF']:
-            #             mn_etfshortamt_in_macct_delta = dict_formatted_holding['ShortAmt']
-            #             mn_etfshortamt_in_macct += mn_etfshortamt_in_macct_delta
-            #         elif sectype in ['CS']:
-            #             mn_cpsshortamt_in_macct_delta = dict_formatted_holding['ShortAmt']
-            #             mn_cpsshortamt_in_macct += mn_cpsshortamt_in_macct_delta
-            #         else:
-            #             ValueError('Unknown security type when computing mn_etfshortamt_macct '
-            #                        'and mn_cpsshortamt_in_macct')
-            # mn_cash_from_ss_in_macct_tgt = mn_cash_from_ss_in_macct
-            # mn_etfshortamt_in_macct_tgt = mn_etfshortamt_in_macct
-            # mn_cpsshortamt_in_macct_tgt = mn_cpsshortamt_in_macct
-            #
-            # if self.dict_tgt_items['ETFShortAmountInMarginAccount']:
-            #     mn_etfshortamt_in_macct_tgt = self.dict_tgt_items['ETFShortAmountInMarginAccount']
-            # if self.dict_tgt_items['CompositeShortAmountInMarginAccount']:
-            #     mn_cpsshortamt_in_macct_tgt = self.dict_tgt_items['CompositeShortAmountInMarginAccount']
-            # if self.dict_tgt_items['CashFromShortSellingInMarginAccount']:
-            #     mn_cash_from_ss_in_macct_tgt = self.dict_tgt_items['CashFromShortSellingInMarginAccount']
-            #
-            # # 求oacct提供的空头暴露预算值与多头暴露预算值
-            # # 求oacct账户中的存出保证金（net_asset）
-            # # 根据实际业务做出假设：1. oacct全部用于MN策略 2.oacct仅提供short exposure，todo oacct中出现多头暴露时需要改进
-            # list_dicts_oacct_basicinfo = list(
-            #     self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o'})
-            # )
-            # net_exposure_from_oaccts = 0  # 假设oacct的账户全部且仅为MN服务
-            # approximate_na_oaccts = 0  # 假设oacct的账户全部且仅为MN服务
-            # for dict_oacct_basicinfo in list_dicts_oacct_basicinfo:
-            #     if dict_oacct_basicinfo:
-            #         acctidbymxz_oacct = dict_oacct_basicinfo['AcctIDByMXZ']
-            #         dict_exposure_analysis_by_acctidbymxz = self.gv.col_exposure_analysis_by_acctidbymxz.find_one(
-            #             {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
-            #         )
-            #         net_exposure_from_oacct_delta = dict_exposure_analysis_by_acctidbymxz['NetExposure']
-            #         net_exposure_from_oaccts += net_exposure_from_oacct_delta
-            #         dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
-            #             {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
-            #         )
-            #         approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
-            #         approximate_na_oaccts += approximate_na_oacct_delta
-            # net_exposure_from_oaccts_tgt = net_exposure_from_oaccts
-            # if self.dict_tgt_items['NetExposureFromOTCAccounts']:
-            #     net_exposure_from_oaccts_tgt = self.dict_tgt_items['NetExposureFromOTCAccounts']
-            # na_oaccts_tgt = approximate_na_oaccts
-            # if self.dict_tgt_items['NetAssetInOTCAccounts']:
-            #     na_oaccts_tgt = self.dict_tgt_items['NetAssetInOTCAccounts']
-            #
-            # mn_ce_from_cash_from_ss_tgt = mn_cash_from_ss_in_macct_tgt
-            # eq_mn_na = (mn_cpslongamt_tgt * (1 + flt_cash2cpslongamt)
-            #             + mn_etflongamt_tgt
-            #             + mn_ce_from_cash_from_ss_tgt
-            #             + mn_ce_from_cash_available
-            #             + mn_special_na
-            #             - mn_iclots_tgt * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-            #             + na_oaccts_tgt
-            #             - mn_na_tgt
-            #             )
-            #
-            # eq_mn_exposure = (mn_cpslongamt_tgt
-            #                   + mn_etflongamt_tgt
-            #                   - mn_etfshortamt_in_macct_tgt
-            #                   - mn_cpsshortamt_in_macct_tgt
-            #                   + mn_iclots_tgt * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
-            #                   + net_exposure_from_oaccts_tgt
-            #                   )
-            #
-            # if self.tgt_cpspct == 'max':
-            #     dict_solve = linsolve(
-            #         [eq_ei_na, eq_mn_na, eq_ei_exposure, eq_mn_exposure],
-            #         ei_cpslongamt_tgt, ei_iclots_tgt, mn_cpslongamt_tgt, mn_iclots_tgt
-            #     )
-            # else:
-            #     dict_solve = linsolve(
-            #         [eq_ei_na, eq_mn_na, eq_ei_exposure, eq_mn_exposure],
-            #         ei_iclots_tgt, mn_iclots_tgt, ei_ce_in_saccts_tgt, mn_ce_from_cash_available
-            #     )
-            # if ei_cpslongamt_tgt in dict_solve:
-            #     ei_cpslongamt_tgt = float(dict_solve[ei_cpslongamt_tgt])
-            # if ei_iclots_tgt in dict_solve:
-            #     ei_iclots_tgt = float(dict_solve[ei_iclots_tgt])
-            # if ei_ce_in_saccts_tgt in dict_solve:
-            #     ei_ce_in_saccts_tgt = float(dict_solve[ei_ce_in_saccts_tgt])
-            # if mn_cpslongamt_tgt in dict_solve:
-            #     mn_cpslongamt_tgt = float(dict_solve[mn_cpslongamt_tgt])
-            # if mn_iclots_tgt in dict_solve:
-            #     mn_iclots_tgt = float(dict_solve[mn_iclots_tgt])
-            # if mn_ce_from_cash_available in dict_solve:
-            #     mn_ce_from_cash_available = float(dict_solve[mn_ce_from_cash_available])
-            #
-            # # 资金分配(cacct 与 macct)
-            # # 公司内部分配算法：信用户如有负债则在信用户中留足够开满仓的资金（0.77 * mn_na_tgt）
-            # mn_na_faccts_tgt = mn_iclots_tgt * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-            # mn_cash_2trd_in_saccts_tgt = mn_cpslongamt_tgt * flt_cash2cpslongamt
-            # mn_shortamt_in_macct = mn_etfshortamt_in_macct + mn_cpsshortamt_in_macct
-            # mn_na_saccts_tgt = mn_na_tgt - mn_na_faccts_tgt - na_oaccts_tgt
-            # if mn_shortamt_in_macct:
-            #     mn_na_macct_tgt = mn_na_tgt * 0.77 * (1 + flt_cash2cpslongamt)  # 按分配到该渠道的满仓资金计算，分配给macct
-            #     mn_cpslongamt_in_macct_tgt = mn_cpslongamt_tgt  # 注意 此处可能不是满仓(0.77)
-            #     mn_cash_2trd_in_macct_tgt = mn_cpslongamt_in_macct_tgt * flt_cash2cpslongamt
-            #     mn_ce_in_macct_tgt = mn_na_macct_tgt - mn_cpslongamt_in_macct_tgt - mn_cash_2trd_in_macct_tgt
-            #     mn_na_cacct_tgt = mn_na_saccts_tgt - mn_na_macct_tgt
-            #     mn_ce_in_cacct_tgt = mn_na_cacct_tgt - 1500000
-            #     if mn_ce_in_cacct_tgt < 0:
-            #         mn_ce_in_cacct_tgt = 0
-            #     mn_cash_in_cacct_tgt = mn_na_cacct_tgt - mn_ce_in_cacct_tgt
-            #     mn_ce_in_saccts_tgt = mn_ce_in_cacct_tgt + mn_ce_in_macct_tgt
-            #     mn_cash_in_saccts_tgt = mn_cash_in_cacct_tgt + mn_cash_2trd_in_macct_tgt
-            #     mn_cpslongamt_in_cacct_tgt = 0
-            #     mn_cash_in_macct_tgt = mn_cash_2trd_in_macct_tgt
-            # else:
-            #     mn_cpslongamt_in_macct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_cash_2trd_in_macct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_cash_in_macct_tgt = mn_cash_2trd_in_macct_tgt
-            #     mn_na_macct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_cpslongamt_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_cash_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_na_cacct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_ce_in_cacct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_ce_in_macct_tgt = 'No allocation limit between cash account and margin account.'
-            #     mn_cash_in_saccts_tgt = mn_cash_2trd_in_saccts_tgt
-            #     mn_ce_in_saccts_tgt = mn_na_saccts_tgt - mn_cpslongamt_tgt - mn_cash_in_saccts_tgt
-            #
-            # ei_na_faccts_tgt = abs(ei_iclots_tgt) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
-            # ei_na_saccts_tgt = ei_na_tgt - ei_na_faccts_tgt - ei_na_oaccts_tgt
-            # ei_cash_in_saccts_tgt = ei_cpslongamt_tgt * flt_cash2cpslongamt
-            # ei_netamt_faccts_tgt = floor(ei_iclots_tgt) * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
-            # ei_int_net_lots_index_future_tgt = floor(ei_iclots_tgt)
-            #
-            # mn_int_net_lots_index_future_tgt = round(mn_iclots_tgt)
-            # mn_netamt_index_future_in_faccts_tgt = (round(mn_iclots_tgt)
-            #                                         * self.gv.dict_index_future2spot_exposure_per_lot[index_future])
-            #
-            # dict_bgt_details = {
-            #     'DataDate': self.str_today,
-            #     'PrdCode': self.prdcode,
-            #     'TargetNetAsset': tgt_na,
-            #     'EINetAsset': ei_na_tgt,
-            #     'EINetAssetOfSecurityAccounts': ei_na_saccts_tgt,
-            #     'EINetAssetOfFutureAccounts': ei_na_faccts_tgt,
-            #     'EINetAssetOfOTCAccounts': ei_na_oaccts_tgt,
-            #     'EINetAssetAllocationBetweenCapitalSources': {},
-            #     'EICashInSecurityAccounts': ei_cash_in_saccts_tgt,
-            #     'EICashEquivalentInSecurityAccounts': ei_ce_in_saccts_tgt,
-            #     'EICompositeLongAmountInSecurityAccounts': ei_cpslongamt_tgt,
-            #     'EICompositeShortAmountInSecurityAccounts': ei_cpsshortamt_tgt,
-            #     'EIETFLongAmountInSecurityAccounts': ei_etflongamt_tgt,
-            #     'EIETFShortAmountInSecurityAccounts': ei_etfshortamt_tgt,
-            #     'EINetAmountInFutureAccounts': ei_netamt_faccts_tgt,
-            #     'EIContractsNetLotsInFutureAccounts': ei_int_net_lots_index_future_tgt,
-            #     'EINetExposureFromOTCAccounts': ei_net_exposure_in_oaccts,
-            #     'EIPositionAllocationBetweenCapitalSources': {},
-            #     'MNNetAsset': mn_na_tgt,
-            #     'MNNetAssetOfSecurityAccounts': mn_na_saccts_tgt,
-            #     'MNNetAssetOfCashAccount': mn_na_cacct_tgt,
-            #     'MNNetAssetOfMarginAccount': mn_na_macct_tgt,
-            #     'MNNetAssetOfFutureAccounts': mn_na_faccts_tgt,
-            #     'MNNetAssetOfOTCAccounts': na_oaccts_tgt,
-            #     'MNNetAssetAllocationBetweenCapitalSources': {},
-            #     'MNCashInSecurityAccounts': mn_cash_in_saccts_tgt,
-            #     'MNCashInCashAccount': mn_cash_in_cacct_tgt,
-            #     'MNCashInMarginAccount': mn_cash_in_macct_tgt,
-            #     'MNCashEquivalentInSecurityAccounts': mn_ce_in_saccts_tgt,
-            #     'MNCashEquivalentInCashAccount': mn_ce_in_cacct_tgt,
-            #     'MNCashEquivalentInMarginAccount': mn_ce_in_macct_tgt,
-            #     'MNCashEquivalentFromCashAvailable': mn_ce_from_cash_available,
-            #     'MNCompositeLongAmountInSecurityAccounts': mn_cpslongamt_tgt,
-            #     'MNCompositeLongAmountInCashAccount': mn_cpslongamt_in_cacct_tgt,
-            #     'MNCompositeLongAmountInMarginAccount': mn_cpslongamt_in_macct_tgt,
-            #     'MNCompositeShortAmountInSecurityAccounts': mn_cpsshortamt_in_macct_tgt,
-            #     'MNCompositeShortAmountInMarginAccount': mn_cpsshortamt_in_macct_tgt,
-            #     'MNETFNetAmountInSecurityAccounts': -mn_etfshortamt_in_macct_tgt,
-            #     'MNETFShortAmountInMarginAccount': mn_etfshortamt_in_macct_tgt,
-            #     'MNNetAmountOfFutureAccounts': mn_netamt_index_future_in_faccts_tgt,
-            #     'MNContractsNetLotsOfFutureAccounts': mn_int_net_lots_index_future_tgt,
-            #     'MNNetExposureFromOTCAccounts': net_exposure_from_oaccts_tgt,
-            #     'MNPositionAllocationBetweenCapitalSources': {},
-            # }
-            # dict_bgt = {
-            #     'DataDate': self.str_today,
-            #     'PrdCode': self.prdcode,
-            #     'CPSLongAmt': float(ei_cpslongamt_tgt + mn_cpslongamt_tgt),
-            #     'ICLots': ceil(ei_iclots_tgt) + round(mn_iclots_tgt),
-            #     'CE': float(ei_ce_in_saccts_tgt + mn_ce_from_cash_available + mn_ce_from_cash_from_ss_tgt)
-            # }
-            #
-            # self.gv.list_items_budget_details.append(dict_bgt_details)
-            # self.gv.list_items_budget.append(dict_bgt)
+        list_dicts_bgt_secaccts = [
+            {
+                'PrdCode': self.prdcode,
+                'AcctIDByMXZ': acctidbymxz_cacct_src1,
+                'NAV': na_cacct_src1,
+                'CPSLongAmt': cpslongamt_in_cacct_src1,
+                'ICLots': None,
+                'CashAvailable': cash_available_in_cacct_src1,
+                'CEFromCashFromSS': None,
+                'CEFromCashAvailable': ce_in_cacct_src1,
+            },
+            {
+                'PrdCode': self.prdcode,
+                'AcctIDByMXZ': acctidbymxz_macct_src1,
+                'NAV': na_macct_src1,
+                'CPSLongAmt': cpslongamt_in_macct_src1,
+                'ICLots': None,
+                'CashAvailable': cash_available_in_macct_src1,
+                'CEFromCashFromSS': ce_from_cash_from_ss_src1,
+                'CEFromCashAvailable': ce_from_cash_available_in_macct_src1,
+            },
+            {
+                'PrdCode': self.prdcode,
+                'AcctIDByMXZ': 'faccts',
+                'NAV': na_faccts,
+                'CPSLongAmt': None,
+                'ICLots': iclots_total,
+                'CEFromCashFromSS': None,
+                'CEFromCashAvailable': None,
+            }
+        ]
+        self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_secaccts
+        self.allocate_faccts(iclots_total)
 
 
 class Account(Product):
@@ -1472,8 +1589,8 @@ class MainFrameWork:
             # prd.check_exposure()
         # self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         # self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
-        self.gv.db_trddata['items_budget'].delete_many({'DataDate': self.gv.str_today})
-        self.gv.db_trddata['items_budget'].insert_many(self.gv.list_items_budget)
+        # self.gv.db_trddata['items_budget'].delete_many({'DataDate': self.gv.str_today})
+        # self.gv.db_trddata['items_budget'].insert_many(self.gv.list_items_budget)
         # self.gv.db_trddata['items_budget_details'].delete_many({'DataDate': self.gv.str_today})
         # self.gv.db_trddata['items_budget_details'].insert_many(self.gv.list_items_budget_details)
 

@@ -72,6 +72,7 @@
    192.168.1.125:8003/?tradetime=t1100 
 
 8. 完整表
+   
    * 5.8/accounts/barra/product_data.xlsx
 
 
@@ -383,7 +384,17 @@
 
 
 
+"""
+acctstatus:
 
+	* T, trading: trading, not liquidated, equity != 0.
+	* N, null: equity = 0（或可忽略不计） and liquidated.
+	* L, liquidated and equity !=0
+	* C: closed or to be closed.
+	* abnormal: 账户异常
+	* unknown: 账户状态未知
+
+"""
 
 
 

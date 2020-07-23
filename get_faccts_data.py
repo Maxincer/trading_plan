@@ -67,27 +67,34 @@ class PrintFutureFmttedInfo:
         df_holding = pd.DataFrame(self.list_dicts_display_holding)
 
         list_dicts_future_api_trdrec = self.col_future_api_trdrec.find({'DataDate': self.str_today})
-        for dict_future_api_trdrec in list_dicts_future_api_trdrec:
-            secid = dict_future_api_trdrec['instrument_id']
-            direction = dict_future_api_trdrec['direction']
-            time = dict_future_api_trdrec['time']
-            volume = dict_future_api_trdrec['volume']
-            price = dict_future_api_trdrec['price']
-            offset = dict_future_api_trdrec['offset']
+        if list_dicts_future_api_trdrec:
 
-            dict_display_trdrec_details = {
-                'DataDateTime': self.str_now,
-                'AcctIDByMXZ': dict_future_api_trdrec['AcctIDByMXZ'],
-                'PrdCode': dict_future_api_trdrec['PrdCode'],
-                'TradeTime': time,
-                'SecurityID': secid,
-                'Direction': direction,
-                'Offset': offset,
-                'Qty': volume,
-                'Price': price,
-            }
-            self.list_dicts_display_trdrec_details.append(dict_display_trdrec_details)
-        df_trdrec_details = pd.DataFrame(self.list_dicts_display_trdrec_details)
+            for dict_future_api_trdrec in list_dicts_future_api_trdrec:
+                secid = dict_future_api_trdrec['instrument_id']
+                direction = dict_future_api_trdrec['direction']
+                time = dict_future_api_trdrec['time']
+                volume = dict_future_api_trdrec['volume']
+                price = dict_future_api_trdrec['price']
+                offset = dict_future_api_trdrec['offset']
+
+                dict_display_trdrec_details = {
+                    'DataDateTime': self.str_now,
+                    'AcctIDByMXZ': dict_future_api_trdrec['AcctIDByMXZ'],
+                    'PrdCode': dict_future_api_trdrec['PrdCode'],
+                    'TradeTime': time,
+                    'SecurityID': secid,
+                    'Direction': direction,
+                    'Offset': offset,
+                    'Qty': volume,
+                    'Price': price,
+                }
+                self.list_dicts_display_trdrec_details.append(dict_display_trdrec_details)
+            df_trdrec_details = pd.DataFrame(self.list_dicts_display_trdrec_details)
+        else:
+            df_trdrec_details = pd.DataFrame(
+                columns=['DataDateTime', 'AcctIDByMXZ', 'PrdCode', 'TradeTime',
+                         'SecurityID', 'Direction', 'Offset', 'Qty', 'Price']
+            )
 
         df_trdrec_aggr_draft = (df_trdrec_details
                                 .loc[:, ['AcctIDByMXZ', 'SecurityID', 'Direction', 'Qty']]
@@ -95,9 +102,13 @@ class PrintFutureFmttedInfo:
         df_trdrec_aggr_draft['DirectionMark'] = df_trdrec_aggr_draft['Direction'].map({'buy': 1, 'sell': -1})
         df_trdrec_aggr_draft['NetQty'] = df_trdrec_aggr_draft['Qty'] * df_trdrec_aggr_draft['DirectionMark']
         df_trdrec_aggr = df_trdrec_aggr_draft.groupby(by=['AcctIDByMXZ', 'SecurityID', 'Direction']).sum().reset_index()
+        if df_trdrec_aggr.empty:
+            df_trdrec_aggr = pd.DataFrame(columns=['AcctIDByMXZ', 'SecurityID', 'Direction', 'NetQty'])
         df_trdrec_aggr['DataDateTime'] = self.str_now
         df_trdrec_aggr['PrdCode'] = df_trdrec_aggr['AcctIDByMXZ'].apply(lambda x: x.split('_')[0])
-        df_trdrec_aggr = df_trdrec_aggr.loc[:, ['DataDateTime', 'AcctIDByMXZ', 'PrdCode', 'NetQty']].copy()
+        df_trdrec_aggr = (df_trdrec_aggr
+                          .loc[:, ['DataDateTime', 'AcctIDByMXZ', 'PrdCode', 'SecurityID', 'NetQty']]
+                          .copy())
 
         with pd.ExcelWriter('info_faccts.xlsx') as writer:
             df_capital.to_excel(writer, sheet_name='capital', index=False)
@@ -121,8 +132,8 @@ class PrintFutureFmttedInfo:
 
 
 if __name__ == '__main__':
-    # db_init = DBTradingData()
-    # db_init.update_trddata_f()
+    db_init = DBTradingData()
+    db_init.update_trddata_f()
     task = PrintFutureFmttedInfo()
     task.run()
 
