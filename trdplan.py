@@ -114,8 +114,8 @@ Naming Convention:
 
 """
 from datetime import datetime
-from math import ceil, floor
-from sympy import Symbol, linsolve, nonlinsolve, solve
+from math import floor
+from sympy import Symbol, solve
 
 import pandas as pd
 import pymongo
@@ -819,6 +819,9 @@ class Product:
                                     eq_mn_ce_from_cash_available_src1 = mn_ce_from_cash_available_src1
                                     list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src1)
                                     list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src1)
+                                    # 约束总资产 = na_src1 + na_sr2
+                                    eq_prdna_tgt = na_src1_tgt + na_src2_tgt - self.prdna_tgt
+                                    list_eqs_2b_solved.append(eq_prdna_tgt)
                                 else:
                                     eq_ei_cpslongamt_allocation_src1 = (
                                         self.prdna_tgt
@@ -848,6 +851,10 @@ class Product:
                                     list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src1)
                                     list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src1)
 
+                                    # 约束总资产 = na_src1 + na_sr2
+                                    eq_prdna_tgt = na_src1_tgt + na_src2_tgt - self.prdna_tgt
+                                    list_eqs_2b_solved.append(eq_prdna_tgt)
+
                             elif idx_src == 1:
                                 if self.prdna_tgt * self.tgt_cpspct > specified_na_in_saccts:
                                     eq_ei_cpslongamt_allocation_src2 = (
@@ -865,6 +872,11 @@ class Product:
                                     eq_mn_ce_from_cash_available_src2 = mn_ce_from_cash_available_src2
                                     list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src2)
                                     list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src2)
+
+                                    # 约束总资产 = na_src1 + na_sr2
+                                    eq_prdna_tgt = na_src1_tgt + na_src2_tgt - self.prdna_tgt
+                                    list_eqs_2b_solved.append(eq_prdna_tgt)
+
                                 else:
                                     eq_ei_cpslongamt_allocation_src2 = (
                                             self.prdna_tgt
@@ -893,6 +905,9 @@ class Product:
                                     )
                                     list_eqs_2b_solved.append(eq_ei_ce_from_cash_available_src2)
                                     list_eqs_2b_solved.append(eq_mn_ce_from_cash_available_src2)
+                                    # 约束总资产 = na_src1 + na_sr2
+                                    eq_prdna_tgt = na_src1_tgt + na_src2_tgt - self.prdna_tgt
+                                    list_eqs_2b_solved.append(eq_prdna_tgt)
                             else:
                                 raise ValueError('Unknown idx_src.')
 
@@ -1209,6 +1224,9 @@ class Product:
         mn_security_debt_in_oaccts_src1 = 0
 
         # ## src1
+        na_src1_tgt = self.prdna_tgt
+        ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
+        mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
         dict_macct_basicinfo_src1 = self.gv.col_acctinfo.find_one(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
         )
@@ -1257,8 +1275,7 @@ class Product:
         # 求oacct账户中的存出保证金（net_asset）
         # ## src1
         list_dicts_oacct_basicinfo_src1 = list(
-            self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode,
-                                       'AcctType': 'o', 'CapitalSource': src1})
+            self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o'})
         )
         mn_net_exposure_from_oaccts_src1 = 0
         mn_approximate_na_oaccts_src1 = 0
@@ -1289,14 +1306,9 @@ class Product:
         ei_ce_from_cash_available_src1 = Symbol('ei_ce_from_cash_available_src1', real=True)
         mn_cpslongamt_src1 = Symbol('mn_cpslongamt_src1', real=True, nonnegative=True)
         mn_ce_from_cash_available_src1 = Symbol('mn_ce_from_cash_available_src1', real=True, )
-        na_src1_tgt = Symbol('na_src1_tgt', real=True, nonnegative=True)
         ei_iclots_src1 = Symbol('ei_iclots_src1', real=True)
         mn_iclots_src1 = Symbol('mn_iclots_src1', real=True)
         list_eqs_2b_solved = []
-
-        # 代数式
-        ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
-        mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
 
         # 方程-双模式计算补充
         if self.tgt_cpspct == 'max':
@@ -1331,7 +1343,7 @@ class Product:
                 + mn_ce_from_ss_src1
                 + mn_etflongamt_src1
                 + mn_special_na_src1
-                + abs(mn_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[index_future]
+                + abs(mn_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
                 + mn_approximate_na_oaccts_src1
                 - mn_na_src1_tgt
                 - mn_capital_debt_in_macct_src1
@@ -1345,7 +1357,7 @@ class Product:
         eq_ei_exposure = (
                 ei_cpslongamt_src1
                 + ei_etflongamt_src1
-                + ei_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
+                + ei_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
                 - ei_cpsshortamt_src1
                 - ei_etfshortamt_src1
                 + ei_net_exposure_from_oaccts_src1
@@ -1356,7 +1368,7 @@ class Product:
         eq_mn_exposure = (
                 mn_cpslongamt_src1
                 + mn_etflongamt_src1
-                + mn_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[index_future]
+                + mn_iclots_src1 * self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
                 - mn_cpsshortamt_src1
                 - mn_etfshortamt_src1
                 + mn_net_exposure_from_oaccts_src1
@@ -1367,14 +1379,14 @@ class Product:
         list_tuples_eqs_solve = solve(list_eqs_2b_solved,
                                       ei_cpslongamt_src1, ei_ce_from_cash_available_src1,
                                       mn_cpslongamt_src1, mn_ce_from_cash_available_src1,
-                                      na_src1_tgt, ei_iclots_src1, mn_iclots_src1)
+                                      ei_iclots_src1, mn_iclots_src1)
         tuple_eqs_solve = list_tuples_eqs_solve[0]
         ei_cpslongamt_src1 = float(tuple_eqs_solve[0])
         ei_ce_from_cash_available_src1 = float(tuple_eqs_solve[1])
         mn_cpslongamt_src1 = float(tuple_eqs_solve[2])
         mn_ce_from_cash_available_src1 = float(tuple_eqs_solve[3])
-        ei_iclots_src1 = float(tuple_eqs_solve[5])
-        mn_iclots_src1 = float(tuple_eqs_solve[6])
+        ei_iclots_src1 = float(tuple_eqs_solve[4])
+        mn_iclots_src1 = float(tuple_eqs_solve[5])
         iclots_total = int(ei_iclots_src1) + round(mn_iclots_src1)
         na_faccts = abs(iclots_total) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
         cpslongamt_src1 = ei_cpslongamt_src1 + mn_cpslongamt_src1
@@ -1388,11 +1400,6 @@ class Product:
         acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
             {'PrdCode': self.prdcode, 'AcctType': 'm'}
         )
-
-        na_cacct_src1 = 0
-        cpslongamt_in_cacct_src1 = 0
-        cash_available_in_cacct_src1 = 0
-        ce_in_cacct_src1 = 0
 
         cpslongamt_in_macct_src1 = None
         na_macct_src1 = None
@@ -1587,6 +1594,7 @@ class MainFrameWork:
             prd.budget()
             # prd.check_exception()
             # prd.check_exposure()
+
         # self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         # self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
         # self.gv.db_trddata['items_budget'].delete_many({'DataDate': self.gv.str_today})
