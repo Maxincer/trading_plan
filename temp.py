@@ -8,21 +8,5 @@ import pandas as pd
 x = Symbol('x', real=True)
 y = Symbol('y', real=True)
 # solve = solve([x * 1.088 + y * 26.5 - 11528 - 920,. x + 133 * y - (11528 + 920) * 0.99], x, y)
-ret = solve([33385 - x - 3 * (11872 - x) - 1660], x)
+ret = solve([1.088 * x + 26.4 * y - 4560, x + 132.4 * y - 4500 - 4057], x, y)
 print(ret)
-
-
-repay = Symbol('repay', real=True)
-withdraw = 2404
-
-na = 23862
-liability = 12102
-
-ret1 = solve([((na + liability - repay - withdraw) / (liability - repay)) - 3], repay)
-
-print(ret1)
-
-with open(r'D:\projects\trading_plan\data\trdrec_from_trdclient\1207_c_db_3756.txt', 'rb') as f:
-    list_datalines = f.readlines()
-    for dataline in list_datalines:
-        print(dataline)

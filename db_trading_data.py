@@ -54,6 +54,7 @@ Note:
 
 Abbr.:
     1. ss: short selling
+    2. dt: datetime
 
 
 """
@@ -568,18 +569,40 @@ class DBTradingData:
         # 上传划款数据
         """
         Abbr.:
-            1. DW: deposit and withdraw, 产品出入金的事项。
+            1. DW: Deposit and Withdraw, 产品出入金的事项。
             2. 事项包括：
-                1. Subscribe and Purchase, 认购与申购
-                2. Redemption, 赎回
-                3. Dividends Distribution, 分红
+                1. S: Subscribe 认购
+                2. P: Purchase 申购
+                2. R: Redemption 赎回
+                3. DD: Dividends Distribution 分红
         思路：
             1.更新SPR事项的原始数据表，按照表中的当日数据更新。
             2.可以对遗漏事项进行补充，DataDate为当日，NoticeDateTime为往日。
-            3.本函数更新原始数据，再提炼出有效数据，进行运算。
+            3.本函数直接根据原始数据计算出可用数据。
             4.划款事项数据的主键为： NoticeDateTime, PrdCode, DWItem, CapitalSource, UNAVDate
         假设：
-            1.重要，DWItemsID按升序依次填写 
+            1. 真正对交易计划产生影响的是申赎款事项的状态。
+            2. 部分划款-已划款状况的处理。
+        字段说明：
+            1. Amt, Shares, DWedAmt为矢量, 是原始表中的数据
+            2. 计算出来的字段有： 
+                1. LatestUNAVOnEffectiveDate: 生效日最新净值，从数据中抓取，影响赎回款的计算。
+                2. DWNetAMT, 为该事项的应划款净额(事项的合计数)。
+                3. 当status为部分划款状态时，根据DWedAmt计算Amt2DB。
+            3. Status:
+                描述DW事项的状态
+                DW状态为状态流上的节点，依次为：
+                已通知/待生效 → 
+                int: {
+                    0: 结束,
+                    1: 已通知，待生效,
+                    2: 已生效，待划款,
+                    3: 部分划款,
+                    4: 全部划款,
+                }
+        
+            
+        
         """
         df_datapatch_dwitems = pd.DataFrame(list(self.col_manually_patchdata_dwitems.find()))
         if df_datapatch_dwitems.empty:
@@ -587,13 +610,31 @@ class DBTradingData:
         else:
             int_dwitemsid_max = df_datapatch_dwitems['DWItemsID'].apply(int).max()
 
-        df_datapatch_dwitems_read_excel = pd.read_excel(self.fpath_datapatch_relative, sheet_name='dwitems',
-                                                        dtype={'DataDate': str, 'DWItemsID': str,
-                                                               'NoticeDateTime': str, 'PrdCode': str, 'UNAVDate': str,
-                                                               'Amt': float, 'Shares': float})
+        df_datapatch_dwitems_read_excel = pd.read_excel(
+            self.fpath_datapatch_relative,
+            sheet_name='dwitems',
+            dtype={
+                'DataDate': str,
+                'DWItemsID': str,
+                'NoticeDateTime': str,
+                'PrdCode': str,
+                'UNAVDate': str,
+                'Amt': float,
+                'Shares': float,
+                'ExpectedDWDate': str,
+                'Status': int,
+                'DWedAmt': float,
+
+            }
+        )
         list_dicts_dwitems_read_excel = df_datapatch_dwitems_read_excel.to_dict('records')
         list_dicts_dwitems_2b_inserted = []
         for dict_dwitems_read_excel in list_dicts_dwitems_read_excel:
+            str_notice_dt = dict_dwitems_read_excel['NoticeDateTime']
+            str_notice_date = str_notice_dt.split('T')[0]
+            str_notice_time = str_notice_dt.split('T')[1]
+            dict_dwitems_read_excel['NoticeDate'] = str_notice_date
+            dict_dwitems_read_excel['NoticeTime'] = str_notice_time
             int_dwitemsid = int(dict_dwitems_read_excel['DWItemsID'])
             if int_dwitemsid > int_dwitemsid_max:
                 dict_dwitems_read_excel['DataDate'] = self.str_today
@@ -602,24 +643,13 @@ class DBTradingData:
         df_datapatch_dwitems_2b_inserted = (df_datapatch_dwitems_2b_inserted
                                             .where(df_datapatch_dwitems_2b_inserted.notnull(), None))
         list_dicts_patch_dwitems = df_datapatch_dwitems_2b_inserted.to_dict('record')
+
         self.db_trddata['manually_patchdata_dwitems'].delete_many({'DataDate': self.str_today})
         if list_dicts_patch_dwitems:
             self.db_trddata['manually_patchdata_dwitems'].insert_many(list_dicts_patch_dwitems)
 
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
 
-    def update_fmtted_dwitems(self):
-        """
-        将原始划款数据进行整理，整理为做tp_plan可用的格式
-        关键字段： EffectiveDate.
-        1. DataDate, 为本条数据客观上生成的时间
-        2. EffectiveDate, 为划款事项影响交易计划的时间
-        3. NoticeDateTime, 为划款事项的通知时间
-        4. ExpectedDWDate, 为划款事项的预计划款时间
-        todo 需提炼
-
-        """
-        list_dicts_patchdata_dwitems = list(self.col_manually_patchdata_dwitems.find({'DataDate': self.str_today}))
 
     def update_na_allocation(self):
         """

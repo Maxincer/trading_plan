@@ -125,7 +125,6 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200722'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -181,7 +180,7 @@ class GlobalVariable:
         self.fpath_datapatch = '/data/data_patch.xlsx'
         self.index_future = 'IC'
         self.flt_cash2cpslongamt = 0.0889
-        self.col_bgt_by_acctidbymxz = self.db_trddata['col_bgt_by_acctidbymxz']
+        self.col_bgt_by_acctidbymxz = self.db_trddata['bgt_by_acctidbymxz']
 
 
 class Product:
@@ -303,7 +302,6 @@ class Product:
                 if len(dict_na_allocation_faccts) == 2:
                     list_keys_na_allocation_faccts = list(dict_na_allocation_faccts.keys())
                     list_keys_na_allocation_faccts.sort()
-                    print(f'顺序为： {list_keys_na_allocation_faccts}')
                     list_values_na_allocation_faccts = [dict_na_allocation_faccts[x]
                                                         for x in list_keys_na_allocation_faccts]
                     specified_na_facct = 0  # 求定值
@@ -327,14 +325,17 @@ class Product:
                                 'DataDate': self.str_today,
                                 'CapitalSource': specified_na_the_other_facct_src,
                                 'AcctType': 'f',
+                                'PrdCode': self.prdcode
                             }
                         )['AcctIDByMXZ']
                         specified_na_facct_src = list_keys_na_allocation_faccts[specified_na_facct_idx]
+
                         acctidbymxz_facct_specified_src = self.gv.col_acctinfo.find_one(
                             {
                                 'DataDate': self.str_today,
                                 'CapitalSource': specified_na_facct_src,
                                 'AcctType': 'f',
+                                'PrdCode': self.prdcode
                             }
                         )['AcctIDByMXZ']
 
@@ -353,6 +354,7 @@ class Product:
 
                         list_dicts_bgt_faccts = [
                             {
+                                'DataDate': self.str_today,
                                 'PrdCode': self.prdcode,
                                 'AcctIDByMXZ': acctidbymxz_facct_specified_src,
                                 'NAV': specified_na_facct,
@@ -362,6 +364,7 @@ class Product:
                                 'CEFromCashAvailable': None,
                             },
                             {
+                                'DataDate': self.str_today,
                                 'PrdCode': self.prdcode,
                                 'AcctIDByMXZ': acctidbymxz_facct_the_other_src,
                                 'NAV': specified_na_the_other,
@@ -379,6 +382,7 @@ class Product:
                                 'DataDate': self.str_today,
                                 'CapitalSource': src1_faccts,
                                 'AcctType': 'f',
+                                'PrdCode': self.prdcode
                             }
                         )['AcctIDByMXZ']
                         iclots_src1 = round(iclots_total * list_values_na_allocation_faccts[0])
@@ -393,6 +397,7 @@ class Product:
                                 'DataDate': self.str_today,
                                 'CapitalSource': src2_faccts,
                                 'AcctType': 'f',
+                                'PrdCode': self.prdcode
                             }
                         )['AcctIDByMXZ']
                         iclots_src2 = round(iclots_total * list_values_na_allocation_faccts[1])
@@ -402,6 +407,7 @@ class Product:
 
                         list_dicts_bgt_faccts = [
                             {
+                                'DataDate': self.str_today,
                                 'PrdCode': self.prdcode,
                                 'AcctIDByMXZ': acctidbymxz_facct_src1,
                                 'NAV': na_facct_src1,
@@ -411,6 +417,7 @@ class Product:
                                 'CEFromCashAvailable': None,
                             },
                             {
+                                'DataDate': self.str_today,
                                 'PrdCode': self.prdcode,
                                 'AcctIDByMXZ': acctidbymxz_facct_src2,
                                 'NAV': na_facct_src2,
@@ -422,12 +429,18 @@ class Product:
 
                         ]
                     self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_faccts
-
             else:
-                acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
-                    {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T'}
+                dict_acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T', 'PrdCode': self.prdcode}
                 )
+
+                if dict_acctidbymxz_facct_trading:
+                    acctidbymxz_facct_trading = dict_acctidbymxz_facct_trading['AcctIDByMXZ']
+                else:
+                    acctidbymxz_facct_trading = None
+
                 dict_bgt_facct = {
+                    'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
                     'AcctIDByMXZ': acctidbymxz_facct_trading,
                     'NAV': na_faccts,
@@ -438,10 +451,17 @@ class Product:
                 }
                 self.list_dicts_bgt_by_acctidbymxz.append(dict_bgt_facct)
         else:
-            acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
-                {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T'}
+            dict_acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T', 'PrdCode': self.prdcode}
             )
+
+            if dict_acctidbymxz_facct_trading:
+                acctidbymxz_facct_trading = dict_acctidbymxz_facct_trading['AcctIDByMXZ']
+            else:
+                acctidbymxz_facct_trading = None
+
             dict_bgt_facct = {
+                'DataDate': self.str_today,
                 'PrdCode': self.prdcode,
                 'AcctIDByMXZ': acctidbymxz_facct_trading,
                 'NAV': na_faccts,
@@ -492,14 +512,6 @@ class Product:
         """
         # 函数级 假设部分
         index_future = self.gv.index_future  # todo 可进一步抽象， 与空头策略有关
-        # # EI 策略现行假设
-        ei_na_oaccts_tgt = 0
-        ei_etflongamt_tgt = 0
-        ei_cpsshortamt_tgt = 0
-        ei_etfshortamt_tgt = 0
-        ei_net_exposure_in_oaccts = 0
-        ei_special_na = 0  # special na, 用于如人工T0/外部团队特殊情况的处理。
-
         dict_na_allocation = self.gv.col_na_allocation.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
 
         if dict_na_allocation:
@@ -1065,15 +1077,25 @@ class Product:
                     acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
                         {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[0], 'AcctType': 'c'}
                     )['AcctIDByMXZ']
-                    acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
+                    dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
                         {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[0], 'AcctType': 'm'}
                     )
+                    if dict_acctidbymxz_macct_src1:
+                        acctidbymxz_macct_src1 = dict_acctidbymxz_macct_src1['AcctIDByMXZ']
+                    else:
+                        acctidbymxz_macct_src1 = None
+
                     acctidbymxz_cacct_src2 = self.gv.col_acctinfo.find_one(
                         {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[1], 'AcctType': 'c'}
                     )['AcctIDByMXZ']
-                    acctidbymxz_macct_src2 = self.gv.col_acctinfo.find_one(
+                    dict_acctidbymxz_macct_src2 = self.gv.col_acctinfo.find_one(
                         {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[1], 'AcctType': 'm'}
                     )
+
+                    if dict_acctidbymxz_macct_src2:
+                        acctidbymxz_macct_src2 = dict_acctidbymxz_macct_src2['AcctIDByMXZ']
+                    else:
+                        acctidbymxz_macct_src2 = None
 
                     na_cacct_src1 = 0
                     na_cacct_src2 = 0
@@ -1143,6 +1165,7 @@ class Product:
 
                     list_dicts_bgt_secaccts = [
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_cacct_src1,
                             'NAV': na_cacct_src1,
@@ -1153,16 +1176,7 @@ class Product:
                             'CEFromCashAvailable': ce_in_cacct_src1,
                         },
                         {
-                            'PrdCode': self.prdcode,
-                            'AcctIDByMXZ': acctidbymxz_macct_src1,
-                            'NAV': na_macct_src1,
-                            'CPSLongAmt': cpslongamt_in_macct_src1,
-                            'ICLots': None,
-                            'CashAvailable': cash_available_in_macct_src1,
-                            'CEFromCashFromSS': ce_from_cash_from_ss_src1,
-                            'CEFromCashAvailable': ce_from_cash_available_in_macct_src1,
-                        },
-                        {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'AcctIDByMXZ': acctidbymxz_cacct_src2,
                             'NAV': na_cacct_src2,
@@ -1173,18 +1187,9 @@ class Product:
                             'CEFromCashAvailable': ce_in_cacct_src2,
                         },
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
-                            'AcctIDByMXZ': acctidbymxz_macct_src2,
-                            'NAV': na_macct_src2,
-                            'CPSLongAmt': cpslongamt_in_macct_src2,
-                            'ICLots': None,
-                            'CashAvailable': cash_available_in_macct_src2,
-                            'CEFromCashFromSS': ce_from_cash_from_ss_src2,
-                            'CEFromCashAvailable': ce_from_cash_available_in_macct_src2,
-                        },
-                        {
-                            'PrdCode': self.prdcode,
-                            'AcctIDByMXZ': 'faccts',
+                            'AcctIDByMXZ': f'{self.prdcode}_faccts',
                             'NAV': na_faccts,
                             'CPSLongAmt': None,
                             'ICLots': iclots_total,
@@ -1192,6 +1197,34 @@ class Product:
                             'CEFromCashAvailable': None,
                         }
                     ]
+
+                    dict_bgt_macct_src1 = {
+                        'DataDate': self.str_today,
+                        'PrdCode': self.prdcode,
+                        'AcctIDByMXZ': acctidbymxz_macct_src1,
+                        'NAV': na_macct_src1,
+                        'CPSLongAmt': cpslongamt_in_macct_src1,
+                        'ICLots': None,
+                        'CashAvailable': cash_available_in_macct_src1,
+                        'CEFromCashFromSS': ce_from_cash_from_ss_src1,
+                        'CEFromCashAvailable': ce_from_cash_available_in_macct_src1,
+                    }
+                    dict_bgt_macct_src2 = {
+                        'DataDate': self.str_today,
+                        'PrdCode': self.prdcode,
+                        'AcctIDByMXZ': acctidbymxz_macct_src2,
+                        'NAV': na_macct_src2,
+                        'CPSLongAmt': cpslongamt_in_macct_src2,
+                        'ICLots': None,
+                        'CashAvailable': cash_available_in_macct_src2,
+                        'CEFromCashFromSS': ce_from_cash_from_ss_src2,
+                        'CEFromCashAvailable': ce_from_cash_available_in_macct_src2,
+                    }
+                    if acctidbymxz_macct_src1:
+                        list_dicts_bgt_secaccts.append(dict_bgt_macct_src1)
+                    if acctidbymxz_macct_src2:
+                        list_dicts_bgt_secaccts.append(dict_bgt_macct_src2)
+
                     self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_secaccts
                     self.allocate_faccts(iclots_total)
             else:
@@ -1322,7 +1355,7 @@ class Product:
             list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
             list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
-        # 核心方程组-净资产
+        # 核心方程组-净资产M
         eq_ei_na_src1 = (
                 ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                 + ei_ce_from_cash_available_src1
@@ -1395,11 +1428,16 @@ class Product:
         # 资金分配(cacct 与 macct)
         # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
         acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'c'}
+            {'PrdCode': self.prdcode, 'AcctType': 'c', 'DataDate': self.str_today}
         )['AcctIDByMXZ']
-        acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'm'}
+        dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
+            {'PrdCode': self.prdcode, 'AcctType': 'm', 'DataDate': self.str_today}
         )
+
+        if dict_acctidbymxz_macct_src1:
+            acctidbymxz_macct_src1 = dict_acctidbymxz_macct_src1['AcctIDByMXZ']
+        else:
+            acctidbymxz_macct_src1 = None
 
         cpslongamt_in_macct_src1 = None
         na_macct_src1 = None
@@ -1424,7 +1462,6 @@ class Product:
             else:
                 ce_in_cacct_src1 = 0
                 cash_available_in_cacct_src1 = na_cacct_src1
-
         else:
             cpslongamt_in_cacct_src1 = cpslongamt_src1
             ce_in_cacct_src1 = ce_from_cash_available_src1
@@ -1433,6 +1470,7 @@ class Product:
 
         list_dicts_bgt_secaccts = [
             {
+                'DataDate': self.str_today,
                 'PrdCode': self.prdcode,
                 'AcctIDByMXZ': acctidbymxz_cacct_src1,
                 'NAV': na_cacct_src1,
@@ -1443,18 +1481,9 @@ class Product:
                 'CEFromCashAvailable': ce_in_cacct_src1,
             },
             {
+                'DataDate': self.str_today,
                 'PrdCode': self.prdcode,
-                'AcctIDByMXZ': acctidbymxz_macct_src1,
-                'NAV': na_macct_src1,
-                'CPSLongAmt': cpslongamt_in_macct_src1,
-                'ICLots': None,
-                'CashAvailable': cash_available_in_macct_src1,
-                'CEFromCashFromSS': ce_from_cash_from_ss_src1,
-                'CEFromCashAvailable': ce_from_cash_available_in_macct_src1,
-            },
-            {
-                'PrdCode': self.prdcode,
-                'AcctIDByMXZ': 'faccts',
+                'AcctIDByMXZ': f'{self.prdcode}_faccts',
                 'NAV': na_faccts,
                 'CPSLongAmt': None,
                 'ICLots': iclots_total,
@@ -1462,6 +1491,21 @@ class Product:
                 'CEFromCashAvailable': None,
             }
         ]
+
+        dict_bgt_macct_src1 = {
+            'DataDate': self.str_today,
+            'PrdCode': self.prdcode,
+            'AcctIDByMXZ': acctidbymxz_macct_src1,
+            'NAV': na_macct_src1,
+            'CPSLongAmt': cpslongamt_in_macct_src1,
+            'ICLots': None,
+            'CashAvailable': cash_available_in_macct_src1,
+            'CEFromCashFromSS': ce_from_cash_from_ss_src1,
+            'CEFromCashAvailable': ce_from_cash_available_in_macct_src1,
+        }
+        if acctidbymxz_macct_src1:
+            list_dicts_bgt_secaccts.append(dict_bgt_macct_src1)
+
         self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_secaccts
         self.allocate_faccts(iclots_total)
 
@@ -1592,11 +1636,11 @@ class MainFrameWork:
         for prdcode in self.list_prdcodes:
             prd = Product(self.gv, prdcode)
             prd.budget()
-            # prd.check_exception()
-            # prd.check_exposure()
+            prd.check_exception()
+            prd.check_exposure()
 
-        # self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
-        # self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
+        self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
+        self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
         # self.gv.db_trddata['items_budget'].delete_many({'DataDate': self.gv.str_today})
         # self.gv.db_trddata['items_budget'].insert_many(self.gv.list_items_budget)
         # self.gv.db_trddata['items_budget_details'].delete_many({'DataDate': self.gv.str_today})
