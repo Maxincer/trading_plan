@@ -26,6 +26,7 @@
       <w>colfind</w>
       <w>colname</w>
       <w>colunms</w>
+      <w>confimation</w>
       <w>cpsamt</w>
       <w>cpslongamt</w>
       <w>cpspct</w>
@@ -41,6 +42,7 @@
       <w>dbclient</w>
       <w>dirpath</w>
       <w>dupatch</w>
+      <w>dwbgt</w>
       <w>dwitems</w>
       <w>dwitemsid</w>
       <w>ehtc</w>
@@ -91,6 +93,7 @@
       <w>prdcodes</w>
       <w>prdinfo</w>
       <w>prdna</w>
+      <w>prdname</w>
       <w>qtyamt</w>
       <w>rawdata</w>
       <w>readlines</w>
@@ -126,10 +129,13 @@
       <w>tgtitems</w>
       <w>trdclient</w>
       <w>trddata</w>
+      <w>trddate</w>
       <w>trdrec</w>
       <w>ttasset</w>
       <w>ttliability</w>
       <w>tushare</w>
+      <w>unav</w>
+      <w>unavs</w>
       <w>underlyingqty</w>
       <w>underlyingsec</w>
       <w>underlyingsecid</w>

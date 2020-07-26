@@ -1,3 +1,7 @@
+#!usr/bin/env python37
+# coding:utf-8
+# Author: Maxincer
+
 from datetime import datetime
 import json
 
@@ -7,6 +11,7 @@ import pandas as pd
 
 class DatabaseBasicInfo:
     def __init__(self):
+        pass
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -21,6 +26,7 @@ class DatabaseBasicInfo:
                                    dtype={
                                        'PrdCode': str,
                                        'PrdName': str,
+                                       'PrdCodeIn4121FinalNew': str,
                                        'StrategiesAllocation': str,
                                        'NetAssetAllocation': str,
                                        'TargetCompositePercentage': float,
@@ -30,6 +36,7 @@ class DatabaseBasicInfo:
         list_dicts_to_be_inserted = df_prdinfo.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
             dict_to_be_inserted['DataDate'] = self.str_today
+            dict_to_be_inserted['UNAVFromLiquidationRpt'] = None
             if dict_to_be_inserted['StrategiesAllocation']:
                 dict_strategy_allocation = json.loads(dict_to_be_inserted['StrategiesAllocation'].replace("'", '"'))
                 if 'MN' not in dict_strategy_allocation:
@@ -69,6 +76,39 @@ class DatabaseBasicInfo:
                 }
         self.col_prdinfo.delete_many({'DataDate': self.str_today})
         self.col_prdinfo.insert_many(list_dicts_to_be_inserted)
+
+        fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
+                                             f'######产品净值相关信息######.xlsx')
+        # 注意读取的最新日期有可能会改变格式，目前为-
+        df_unav_from_4121_final_new = pd.read_excel(
+            fpath_df_unav_from_4121_final_new,
+            dtype={
+                '产品编号': str,
+                '产品名称': str,
+                '最新更新日期': str,
+                '最新净值': float,
+            }
+        )
+        list_dicts_unavs_from_4121_final_new = df_unav_from_4121_final_new.to_dict('records')
+        for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
+            prdcode_in_4122_final_new = dict_unav_from_4121_final_new['产品编号']
+            latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
+            latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
+
+            dict_prdinfo = self.col_prdinfo.find_one(
+                {'DataDate': self.str_today, 'PrdCodeIn4121FinalNew': prdcode_in_4122_final_new}
+            )
+            if dict_prdinfo:
+                self.col_prdinfo.update_one(
+                    {
+                        'DataDate': latest_unav_date_in_final_new,
+                        'PrdCodeIn4121FinalNew': prdcode_in_4122_final_new,
+                    },
+                    {
+                        '$set': {'UNAVFromLiquidationRpt': latest_unav_in_final_new}
+                    }
+                )
+
         print('Collection "prdinfo" has been updated.')
 
     def update_acctinfo(self):

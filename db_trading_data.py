@@ -75,6 +75,7 @@ class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
         w.start()
+        self.str_last_trddate = w.tdaysoffset(-1, "2020-07-26", "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.db_trddata = self.client_mongo['trddata']
@@ -86,6 +87,7 @@ class DBTradingData:
         self.dict_future2multiplier = {'IC': 200, 'IH': 300, 'IF': 300}
         self.col_fmtted_dwitems = self.db_trddata['fmtted_dwitems']
         self.col_manually_patchdata_dwitems = self.db_trddata['manually_patchdata_dwitems']
+        self.col_na_allocation = self.db_trddata['na_allocation']
 
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
@@ -584,12 +586,23 @@ class DBTradingData:
             1. 真正对交易计划产生影响的是申赎款事项的状态。
             2. 部分划款-已划款状况的处理。
         字段说明：
+            0. DWItemsID: 由日期和4位代码升序代码组成，eg: 202007240001
             1. Amt, Shares, DWedAmt为矢量, 是原始表中的数据
-            2. 计算出来的字段有： 
-                1. LatestUNAVOnEffectiveDate: 生效日最新净值，从数据中抓取，影响赎回款的计算。
-                2. DWNetAMT, 为该事项的应划款净额(事项的合计数)。
-                3. 当status为部分划款状态时，根据DWedAmt计算Amt2DB。
-            3. Status:
+            2. UNAVConfirmationDate: 申赎依据该净值确认日期确认。 
+            3. 计算出来的字段有： 
+                1. LatestUNAVRptDate, 最新报告净值期日
+                2. UNAVOnConfirmationDate, 净值确认日的净值
+                3. DWBgtUNAV: 划款事项预算净值
+                   读取状态码，当状态码为2/3时，
+                   如有申赎确认日净值，则使用申赎确认日净值，
+                   否则使用最新净值。
+                2. DWBGTNetAMT, 为该事项的应划款净额(事项的历史合计数)。
+                   估算值（谨慎估算），矢量值，为定值，不受部分已划款金额的影响。
+                3. DWBGTNetAMT2DW, 为该事项当前的待划款金额的影响
+                    重要，该值对预算净值产生直接影响。
+                    Amt2DW = DWBGTNetAMT - AmtDWed
+                 
+            4. Status:
                 描述DW事项的状态
                 DW状态为状态流上的节点，依次为：
                 已通知/待生效 → 
@@ -600,15 +613,28 @@ class DBTradingData:
                     3: 部分划款,
                     4: 全部划款,
                 }
-        
             
-        
+        5. 在写入数据库时，读取excel中的所有数据，将状态码大于0的事项写入。即在excel中，可删除status为0的条目。
+            本质上为全量写入，但是由于从企业微信抓取的数据可能为重复事项，出于谨慎性考虑，故保留此步
+        6. DW事项可在任意节点强制取消，故由人控制状态码，此步不可少
+            
         """
-        df_datapatch_dwitems = pd.DataFrame(list(self.col_manually_patchdata_dwitems.find()))
-        if df_datapatch_dwitems.empty:
-            int_dwitemsid_max = 0
-        else:
-            int_dwitemsid_max = df_datapatch_dwitems['DWItemsID'].apply(int).max()
+
+        # 读取清算净值数据：
+        # \\192.168.4.121\data\Final_new\20200724
+        fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
+                                             f'######产品净值相关信息######.xlsx')
+        # 注意读取的最新日期有可能会改变格式，目前为-
+        df_unav_from_4121_final_new = pd.read_excel(
+            fpath_df_unav_from_4121_final_new,
+            dtype={
+                '产品编号': str,
+                '产品名称': str,
+                '最新更新日期': str,
+                '最新净值': float,
+            }
+        )
+        list_dicts_unavs_from_4121_final_new = df_unav_from_4121_final_new.to_dict('records')
 
         df_datapatch_dwitems_read_excel = pd.read_excel(
             self.fpath_datapatch_relative,
@@ -624,37 +650,80 @@ class DBTradingData:
                 'ExpectedDWDate': str,
                 'Status': int,
                 'DWedAmt': float,
-
+                'EffectiveDate': str,
             }
         )
+        df_datapatch_dwitems_read_excel = (df_datapatch_dwitems_read_excel
+                                           .where(df_datapatch_dwitems_read_excel.notnull(), None))
         list_dicts_dwitems_read_excel = df_datapatch_dwitems_read_excel.to_dict('records')
         list_dicts_dwitems_2b_inserted = []
         for dict_dwitems_read_excel in list_dicts_dwitems_read_excel:
+            unav_confirmation_date = dict_dwitems_read_excel['UNAVConfirmationDate']
+            unav_on_confirmation_date = None
+            latest_unav_in_final_new = None
+            prdcode = dict_dwitems_read_excel['PrdCode']
+            dwamt = dict_dwitems_read_excel['Amt']
+            dwshares = dict_dwitems_read_excel['Shares']
+            dwed_amt = dict_dwitems_read_excel['DWedAmt']
+            if not dwed_amt:
+                dwed_amt = 0
+            if dwshares is None:
+                dwshares = 0
+            for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
+                prdcode_in_final_new = dict_unav_from_4121_final_new['产品编号']
+                latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
+                latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
+                if prdcode_in_final_new == prdcode:
+                    dict_dwitems_read_excel['LatestUNAVRptDate'] = latest_unav_date_in_final_new
+                    dict_dwitems_read_excel['LatestRptUNAV'] = latest_unav_in_final_new
+
+                    if unav_confirmation_date <= latest_unav_date_in_final_new:
+                        dict_prdinfo = self.col_prdinfo.find_one(
+                            {'DataDate': unav_confirmation_date, 'PrdCodeIn4121FinalNew': prdcode_in_final_new}
+                        )
+                        unav_on_confirmation_date = dict_prdinfo['UNAVFromLiquidationRpt']
+            if unav_on_confirmation_date:
+                dwbgt_unav = unav_on_confirmation_date
+            else:
+                dwbgt_unav = latest_unav_in_final_new
+
+            dwbgt_netamt = dwamt + dwshares * dwbgt_unav
+
             str_notice_dt = dict_dwitems_read_excel['NoticeDateTime']
             str_notice_date = str_notice_dt.split('T')[0]
             str_notice_time = str_notice_dt.split('T')[1]
+
             dict_dwitems_read_excel['NoticeDate'] = str_notice_date
             dict_dwitems_read_excel['NoticeTime'] = str_notice_time
-            int_dwitemsid = int(dict_dwitems_read_excel['DWItemsID'])
-            if int_dwitemsid > int_dwitemsid_max:
-                dict_dwitems_read_excel['DataDate'] = self.str_today
+            dict_dwitems_read_excel['DataDate'] = self.str_today
+            dict_dwitems_read_excel['Shares'] = dwshares
+            dict_dwitems_read_excel['UNAVOnConfirmationDate'] = unav_on_confirmation_date
+            dict_dwitems_read_excel['UNAVOnLatestRptDate'] = latest_unav_in_final_new
+            dict_dwitems_read_excel['DWBGTNetAmt'] = dwbgt_netamt
+            dict_dwitems_read_excel['DWBGTNetAMT2DW'] = dwbgt_netamt - dwed_amt
+            status = dict_dwitems_read_excel['Status']
+            if status > 0:
                 list_dicts_dwitems_2b_inserted.append(dict_dwitems_read_excel)
-        df_datapatch_dwitems_2b_inserted = pd.DataFrame(list_dicts_dwitems_2b_inserted)
-        df_datapatch_dwitems_2b_inserted = (df_datapatch_dwitems_2b_inserted
-                                            .where(df_datapatch_dwitems_2b_inserted.notnull(), None))
-        list_dicts_patch_dwitems = df_datapatch_dwitems_2b_inserted.to_dict('record')
 
         self.db_trddata['manually_patchdata_dwitems'].delete_many({'DataDate': self.str_today})
-        if list_dicts_patch_dwitems:
-            self.db_trddata['manually_patchdata_dwitems'].insert_many(list_dicts_patch_dwitems)
+        if list_dicts_dwitems_2b_inserted:
+            self.db_trddata['manually_patchdata_dwitems'].insert_many(list_dicts_dwitems_2b_inserted)
 
         print('Collection manually_patchdata_capital and collection manually_patchdata_holding updated.')
 
-
     def update_na_allocation(self):
         """
-        时间序列，分配产品渠道比例
+        计算产品渠道比例
+        可以在datapatch中重新指定比例
+        todo 比例的自动计算：
+        1. 读前一天的比例
+        2. 筛选出effective date为今天的划款并汇总，
+        3. 读取当前净资产值
+        4. 计算比例，写入数据库
+        5. 将指定比例写入数据库
         """
+        list_dicts_na_allocation_last_trddate = list(self.col_na_allocation.find({'DataDate': self.str_last_trddate}))
+
         list_dicts_prdinfo = list(self.col_prdinfo.find({'DataDate': self.str_today}))
         list_dicts_na_allocation = []
         for dict_prdinfo in list_dicts_prdinfo:
@@ -676,6 +745,11 @@ class DBTradingData:
                     'FutureAccountsNetAssetAllocation': dict_na_allocation_faccts,
                 }
                 list_dicts_na_allocation.append(dict_na_allocation)
+
+
+
+
+
         self.db_trddata['na_allocation'].delete_many({'DataDate': self.str_today})
         if list_dicts_na_allocation:
             self.db_trddata['na_allocation'].insert_many(list_dicts_na_allocation)
@@ -1482,10 +1556,9 @@ class DBTradingData:
         # self.update_trddata_f()
         self.update_rawdata()
         self.update_manually_patchdata()
-        self.update_fmtted_dwitems()
-        self.update_na_allocation()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
+        self.update_na_allocation()
         print("Database preparation finished.")
 
 
