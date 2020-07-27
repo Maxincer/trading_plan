@@ -746,10 +746,6 @@ class DBTradingData:
                 }
                 list_dicts_na_allocation.append(dict_na_allocation)
 
-
-
-
-
         self.db_trddata['na_allocation'].delete_many({'DataDate': self.str_today})
         if list_dicts_na_allocation:
             self.db_trddata['na_allocation'].insert_many(list_dicts_na_allocation)
@@ -1552,12 +1548,33 @@ class DBTradingData:
             self.db_trddata['exposure_analysis_by_prdcode'].insert_many(list_dicts_exposure_analysis_by_prdcode)
         print('Update b/s by prdcode and exposure analysis by prdcode finished')
 
+    def update_col_tgtna_by_prdcode(self):
+        """
+        这个表处理所有产品的目标净资产。
+        算法：
+            1. 读取源数据中的净资产
+            2. 读取生效的划款数据，进行汇总
+            3. 读取指定的净资产
+            4. 计算预算用目标净资产
+
+        todo
+            1. 可拓展各渠道的净资产
+        """
+        
+
+
+        self.prdna_tgt = self.prd_approximate_na
+        if self.dict_tgt_items:
+            if self.dict_tgt_items['NetAsset']:
+                self.prdna_tgt = self.dict_tgt_items['NetAsset']
+
     def run(self):
         # self.update_trddata_f()
         self.update_rawdata()
         self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
+        self.update_col_tgt_na_by_prdcode()
         self.update_na_allocation()
         print("Database preparation finished.")
 

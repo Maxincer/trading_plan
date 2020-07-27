@@ -115,7 +115,6 @@ class PrintFutureFmttedInfo:
             df_holding.to_excel(writer, sheet_name='holding', index=False)
             df_trdrec_aggr.to_excel(writer, sheet_name='trdrec_aggr', index=False)
             df_trdrec_details.to_excel(writer, sheet_name='trdrec_details', index=False)
-
             worksheet_capital = writer.sheets['capital']
             worksheet_capital.set_column('A:B', 17.75)
             worksheet_holding = writer.sheets['holding']

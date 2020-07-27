@@ -209,10 +209,12 @@ class Product:
         self.prd_ttasset = dict_bs_by_prdcode['TotalAsset']
         self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
         self.list_dicts_bgt_by_acctidbymxz = []
+
         self.prdna_tgt = self.prd_approximate_na
         if self.dict_tgt_items:
             if self.dict_tgt_items['NetAsset']:
                 self.prdna_tgt = self.dict_tgt_items['NetAsset']
+
         self.ei_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['EI']
         self.mn_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['MN']
 
