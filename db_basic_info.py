@@ -19,6 +19,7 @@ class DatabaseBasicInfo:
         self.col_acctinfo = db_basicinfo['acctinfo']
         self.col_acctinfo.create_index([('DataDate', pymongo.DESCENDING), ('AcctIDByMXZ', pymongo.ASCENDING)])
         self.col_prdinfo = db_basicinfo['prdinfo']
+        self.col_broker_info = db_basicinfo['broker_info']
 
     def update_acctinfo(self):
         """
@@ -63,10 +64,13 @@ class DatabaseBasicInfo:
                                    dtype={
                                        'PrdCode': str,
                                        'PrdName': str,
+                                       'SignalsOnTrdPlan': str,
+                                       'CptTrdStartTime': str,
                                        'PrdCodeIn4121FinalNew': str,
                                        'StrategiesAllocation': str,
                                        'NetAssetAllocation': str,
                                        'TargetCompositePercentage': float,
+                                       '超额计提': int,
                                        'TargetItems': str,
                                    })
         df_prdinfo = df_prdinfo.where(df_prdinfo.notnull(), None)
@@ -152,12 +156,32 @@ class DatabaseBasicInfo:
                             '$set': {'UNAVFromLiquidationRpt': latest_unav_in_final_new}
                         }
                     )
+        print('Collection "prdinfo" has been updated.')
 
-            print('Collection "prdinfo" has been updated.')
+    def update_broker_info(self):
+        """
+        无运行顺序要求
+        """
+        df_broker_info = pd.read_excel(self.fpath_basicinfo,
+                                       sheet_name='broker_info',
+                                       dtype={
+                                           'BrokerAlias': str,
+                                           'BrokerAbbr': str,
+                                           'BrokerType': str,
+                                           'BrokerAliasInTrdPlan': str
+                                       })
+        df_broker_info = df_broker_info.where(df_broker_info.notnull(), None)
+        list_dicts_to_be_inserted = df_broker_info.to_dict('records')
+        for dict_to_be_inserted in list_dicts_to_be_inserted:
+            dict_to_be_inserted['DataDate'] = self.str_today
+        self.col_broker_info.delete_many({'DataDate': self.str_today})
+        self.col_broker_info.insert_many(list_dicts_to_be_inserted)
+        print('Collection "broker_info" has been updated.')
 
     def run(self):
         self.update_acctinfo()
         self.update_prdinfo()
+        self.update_broker_info()
 
 
 if __name__ == '__main__':

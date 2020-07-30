@@ -5,7 +5,8 @@ from sympy import linsolve, Symbol, solve
 import pandas as pd
 
 x = Symbol('x')
-y = Symbol('y')
-
-solved = solve([x * 1.088 + 25.1 * y - 55450 - 1937, x - (y + 365) * 125.7], x, y)
+y = Symbol('y', real=True)
+solved = solve([x * 1.088 + 26 * y - 22261, x + y * 130.2 - 22261 * 0.99], x, y)
 print(solved)
+
+print(1 == True)

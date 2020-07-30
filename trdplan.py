@@ -99,8 +99,6 @@ Sympy:
     1. Sympy 中的 solveset， 不能解多元非线性方程组（带domain的），但是solve可以。
     2. Sympy中的solve, 如果解为多解时，也返回空列表。此处可用solveset区分无解与多解。
 
-
-
 Naming Convention:
     1. Security Accounts:
         1. 根据《上海证券交易所融资融券交易实施细则》，margin account 的官方翻译为：“信用证券账户”。
@@ -110,11 +108,12 @@ Naming Convention:
         5. 根据《上海证券交易所融资融券交易实施细则》，“证券类资产”，是指投资者持有的客户交易结算资金、股票、债券、基金、证券公司资管计划等资产。
     2. Cash Available: 本脚本中，将信用户可用于交易的资金，叫做Cash Available
     3. 本项目中，对于合计项目(如iclots_total)total标识一定要加上.
-    4. 对于净资产，为避免与None值缩写’N/A,NA'产生混淆，统一使用NAV
+    4. 对于净资产字段，为避免与None值缩写’N/A,NA'产生混淆，统一使用NAV
 
 """
 from datetime import datetime
 from math import floor
+from os import path
 from sympy import Symbol, solve
 
 import pandas as pd
@@ -151,6 +150,7 @@ class GlobalVariable:
         self.list_items_budget_details = []
         self.list_items_budget = []
         w.start()
+        self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         set_ic_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014872000000").Data[1])
         set_if_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=a599010102000000").Data[1])
         set_ih_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014871000000").Data[1])
@@ -181,6 +181,16 @@ class GlobalVariable:
         self.index_future = 'IC'
         self.flt_cash2cpslongamt = 0.0889
         self.col_bgt_by_acctidbymxz = self.db_trddata['bgt_by_acctidbymxz']
+        self.col_tgtna_by_prdcode = self.db_trddata['tgtna_by_prdcode']
+        self.col_broker_info = self.db_basicinfo['broker_info']
+        self.list_dicts_trdplan_output = []
+        self.col_facct_holding_aggr_by_prdcode = self.db_trddata['facct_holding_aggr_by_prdcode']
+        self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
+        self.dict_broker_abbr2broker_alias = {}
+        for dict_broker_info in self.list_dicts_broker_info:
+            brokerabbr = dict_broker_info['BrokerAbbr']
+            brokeralias = dict_broker_info['BrokerAlias']
+            self.dict_broker_abbr2broker_alias[brokerabbr] = brokeralias
 
 
 class Product:
@@ -191,10 +201,13 @@ class Product:
         self.prdcode = prdcode
         self.iter_col_acctinfo_find = (self.gv.col_acctinfo
                                        .find({'PrdCode': self.prdcode, 'RptMark': 1, 'DataDate': self.str_today}))
-        dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
+        self.dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
         dict_exposure_analysis_by_prdcode = (self.gv.col_exposure_analysis_by_prdcode
                                              .find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today}))
         self.dict_prdinfo = self.gv.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+        self.prdname = self.dict_prdinfo['PrdName']
+        self.signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
+        self.str_cpsttrdstarttime = self.dict_prdinfo['CptTrdStartTime']
         if self.dict_prdinfo['StrategiesAllocation']:
             self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         else:
@@ -205,18 +218,50 @@ class Product:
         self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
         self.prd_short_exposure = dict_exposure_analysis_by_prdcode['ShortExposure']
         self.prd_net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
-        self.prd_approximate_na = dict_bs_by_prdcode['ApproximateNetAsset']
-        self.prd_ttasset = dict_bs_by_prdcode['TotalAsset']
+        self.prd_approximate_na = self.dict_bs_by_prdcode['ApproximateNetAsset']
+        self.prd_ttasset = self.dict_bs_by_prdcode['TotalAsset']
         self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
         self.list_dicts_bgt_by_acctidbymxz = []
 
-        self.prdna_tgt = self.prd_approximate_na
-        if self.dict_tgt_items:
-            if self.dict_tgt_items['NetAsset']:
-                self.prdna_tgt = self.dict_tgt_items['NetAsset']
-
+        self.dict_tgtna_by_prdcode = self.gv.col_tgtna_by_prdcode.find_one(
+            {'DataDate': self.str_today, 'PrdCode': prdcode}
+        )
+        self.prdna_tgt = self.dict_tgtna_by_prdcode['TgtNA']
         self.ei_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['EI']
         self.mn_na_tgt = self.prdna_tgt * self.dict_strategies_allocation['MN']
+        recdict_unav = self.get_latest_unav()
+        self.latest_rptdate_unav = recdict_unav['LatestUNAVRptDate']
+        self.latest_rptunav = recdict_unav['LatestRptUNAV']
+
+    def get_latest_unav(self):
+        prdcode_in_4121_final_new = self.dict_prdinfo['PrdCodeIn4121FinalNew']
+        fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
+                                             f'######产品净值相关信息######.xlsx')
+        if not path.exists(fpath_df_unav_from_4121_final_new):
+            fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.gv.str_last_trddate}/'
+                                                 f'######产品净值相关信息######.xlsx')
+        # 注意读取的最新日期有可能会改变格式，目前为-
+        df_unav_from_4121_final_new = pd.read_excel(
+            fpath_df_unav_from_4121_final_new,
+            dtype={
+                '产品编号': str,
+                '产品名称': str,
+                '最新更新日期': str,
+                '最新净值': float,
+            }
+        )
+        latest_rptdate = None
+        latest_rptunav = None
+        list_dicts_unavs_from_4121_final_new = df_unav_from_4121_final_new.to_dict('records')
+        for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
+            if dict_unav_from_4121_final_new['产品编号'] == prdcode_in_4121_final_new:
+                latest_rptdate = dict_unav_from_4121_final_new['最新更新日期']
+                latest_rptunav = dict_unav_from_4121_final_new['最新净值']
+        recdict_unav = {
+            'LatestUNAVRptDate': latest_rptdate,
+            'LatestRptUNAV': latest_rptunav
+        }
+        return recdict_unav
 
     def check_exposure(self):
         dict_exposure_analysis_by_prdcode = self.gv.col_exposure_analysis_by_prdcode.find_one(
@@ -1357,7 +1402,7 @@ class Product:
             list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
             list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
-        # 核心方程组-净资产M
+        # 核心方程组-净资产
         eq_ei_na_src1 = (
                 ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                 + ei_ce_from_cash_available_src1
@@ -1430,10 +1475,10 @@ class Product:
         # 资金分配(cacct 与 macct)
         # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
         acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'c', 'DataDate': self.str_today}
+            {'PrdCode': self.prdcode, 'AcctType': 'c', 'DataDate': self.str_today, 'RptMark': 1}
         )['AcctIDByMXZ']
         dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'm', 'DataDate': self.str_today}
+            {'PrdCode': self.prdcode, 'AcctType': 'm', 'DataDate': self.str_today, 'RptMark': 1}
         )
 
         if dict_acctidbymxz_macct_src1:
@@ -1450,7 +1495,7 @@ class Product:
 
         # todo 如有信用户，则”应该“该渠道按照最少净资产原则放在信用户里交易（还未做成）
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1, 'SpecialAccountMark': 0}
+            {'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
         )
         if dict_macct_basicinfo:
             cpslongamt_in_macct_src1 = cpslongamt_src1
@@ -1510,6 +1555,353 @@ class Product:
 
         self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_secaccts
         self.allocate_faccts(iclots_total)
+
+    def output_trdplan_order(self):
+        """
+        输出该产品的交易计划上的条目数据，存储在gv.list_trplan_output中。
+        输出dict数据。
+        """
+        # 今资金划转计划
+        list_dicts_bgt_by_acctidbymxz = list(
+            self.gv.col_bgt_by_acctidbymxz.find({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+        )
+        list_str_orders_capital_outflow = []
+        list_str_orders_capital_inflow = []
+
+        for dict_bgt_by_acctidbymxz in list_dicts_bgt_by_acctidbymxz:
+            acctidbymxz = dict_bgt_by_acctidbymxz['AcctIDByMXZ']
+            if acctidbymxz.split('_')[1] == 'faccts':
+                continue
+            nav_bgt = dict_bgt_by_acctidbymxz['NAV']
+            dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+            )
+            approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+            capital_dif = approximate_na - nav_bgt
+            # 精度调整
+            capital_dif_round = round(capital_dif / 50000) * 5
+            prdcode = acctidbymxz.split('_')[0]
+            accttype = acctidbymxz.split('_')[1]
+            broker_abbr = acctidbymxz.split('_')[2]
+            dict_accttype2natual_language = {'c': '证', 'm': '证', 'f': '期'}
+            dict_accttype2cmname = {'c': '（普通）', 'm': '（信用）'}
+            dict_accttype2natual_language_with_secsrc_and_cmname = {
+                'c': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}普通）',
+                'm': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}信用）',
+                'f': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}）'
+            }
+            dict_accttype2natual_language_with_secsrc = {
+                'c': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}）',
+                'm': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}）',
+                'f': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}）'
+            }
+            dict_acctinfo_for_m_mark = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctType': 'm', 'PrdCode': prdcode, 'BrokerAbbr': broker_abbr}
+            )
+
+            if self.dict_na_allocation:
+                if self.dict_na_allocation['SecurityAccountsNetAssetAllocation']:
+                    if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
+                        if dict_acctinfo_for_m_mark:
+                            if capital_dif_round > 0:
+                                str_order_capital = (
+                                    f'{dict_accttype2natual_language[accttype]}'
+                                    f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
+                                    f'{capital_dif_round}万'
+                                )
+                            elif capital_dif_round < 0:
+                                str_order_capital = (
+                                    f'银转{dict_accttype2natual_language[accttype]}'
+                                    f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}'
+                                    f'{capital_dif_round}万'
+                                )
+                            else:
+                                str_order_capital = ''
+                        else:
+                            str_order_capital = (
+                                f'{dict_accttype2natual_language[accttype]}'
+                                f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
+                                f'{capital_dif_round}万'
+                            )
+                    else:
+                        if accttype == 'f':
+                            if capital_dif_round > 0:
+                                str_order_capital = f'期转银{capital_dif_round}万'
+                            elif capital_dif_round < 0:
+                                str_order_capital = f'银转期{capital_dif_round}万'
+                            else:
+                                str_order_capital = ''
+                        else:
+                            if dict_acctinfo_for_m_mark:
+                                if capital_dif_round > 0:
+                                    str_order_capital = (
+                                        f'{dict_accttype2natual_language[accttype]}'
+                                        f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
+                                        f'{capital_dif_round}万'
+                                    )
+                                elif capital_dif_round < 0:
+                                    str_order_capital = (
+                                        f'银转{dict_accttype2natual_language[accttype]}'
+                                        f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}'
+                                        f'{capital_dif_round}万'
+                                    )
+                                else:
+                                    str_order_capital = ''
+                            else:
+                                if capital_dif_round > 0:
+                                    str_order_capital = (
+                                        f'{dict_accttype2natual_language[accttype]}'
+                                        f'{dict_accttype2natual_language_with_secsrc[accttype]}转银'
+                                        f'{capital_dif_round}万'
+                                    )
+                                elif capital_dif_round < 0:
+                                    str_order_capital = (
+                                        f'银转{dict_accttype2natual_language[accttype]}'
+                                        f'{dict_accttype2natual_language_with_secsrc[accttype]}'
+                                        f'{capital_dif_round}万'
+                                    )
+                                else:
+                                    str_order_capital = ''
+                else:
+                    if accttype in ['c', 'm']:
+                        if dict_acctinfo_for_m_mark:
+                            if capital_dif_round > 0:
+                                str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{capital_dif_round}万'
+                            elif capital_dif_round < 0:
+                                str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{capital_dif_round}万'
+                            else:
+                                str_order_capital = ''
+                        else:
+                            if capital_dif_round > 0:
+                                str_order_capital = f'证转银{capital_dif_round}万'
+                            elif capital_dif_round < 0:
+                                str_order_capital = f'银转证{capital_dif_round}万'
+                            else:
+                                str_order_capital = ''
+                    elif accttype in ['f']:
+                        if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
+                            if capital_dif_round > 0:
+                                str_order_capital = (f'期{dict_accttype2natual_language_with_secsrc[accttype]}转银'
+                                                     f'{capital_dif_round}万')
+                            elif capital_dif_round < 0:
+                                str_order_capital = (f'银转期{dict_accttype2natual_language_with_secsrc[accttype]}'
+                                                     f'{capital_dif_round}万')
+                            else:
+                                str_order_capital = ''
+                        else:
+                            if capital_dif_round > 0:
+                                str_order_capital = f'期转银{capital_dif_round}万'
+                            elif capital_dif_round < 0:
+                                str_order_capital = f'银转期{capital_dif_round}万'
+                            else:
+                                str_order_capital = ''
+                    else:
+                        raise ValueError('Unknown accttype')
+            else:
+                if accttype in ['c', 'm']:
+                    if dict_acctinfo_for_m_mark:
+                        if capital_dif_round > 0:
+                            str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{capital_dif_round}万'
+                        elif capital_dif_round < 0:
+                            str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{capital_dif_round}万'
+                        else:
+                            str_order_capital = ''
+                    else:
+                        if capital_dif_round > 0:
+                            str_order_capital = f'证转银{capital_dif_round}万'
+                        elif capital_dif_round < 0:
+                            str_order_capital = f'银转证{capital_dif_round}万'
+                        else:
+                            str_order_capital = ''
+                elif accttype in ['f']:
+                    if capital_dif_round > 0:
+                        str_order_capital = f'期转银{capital_dif_round}万'
+                    elif capital_dif_round < 0:
+                        str_order_capital = f'银转期{capital_dif_round}万'
+                    else:
+                        str_order_capital = ''
+                else:
+                    raise ValueError('Unknown accttype')
+            if capital_dif_round > 50:
+                list_str_orders_capital_outflow.append(str_order_capital)
+            elif capital_dif_round < -50:
+                list_str_orders_capital_inflow.append(str_order_capital)
+            else:
+                pass
+
+        list_dicts_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find(
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+        )
+        for dict_bs_by_acctidbymxz in list_dicts_bs_by_acctidbymxz:
+            acctidbymxz_in_bs = dict_bs_by_acctidbymxz['AcctIDByMXZ']
+            dict_bgt_by_acctidbymxz = self.gv.col_bgt_by_acctidbymxz.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_in_bs}
+            )
+            if dict_bgt_by_acctidbymxz is None:
+                str_order_capital = f'{acctidbymxz_in_bs}转银全部,'
+                list_str_orders_capital_outflow.append(str_order_capital)
+        list_str_orders_capital_outflow.sort()
+        list_str_orders_capital_inflow.sort()
+        list_str_orders_capital = list_str_orders_capital_outflow + list_str_orders_capital_inflow
+        str_orders_capital = '\n'.join(list_str_orders_capital)
+
+        # 目标持仓及期指
+        list_str_orders_position = []
+        for dict_bgt_by_acctidbymxz in list_dicts_bgt_by_acctidbymxz:
+            acctidbymxz = dict_bgt_by_acctidbymxz['AcctIDByMXZ']
+            accttype = acctidbymxz.split('_')[1]
+            str_order_position = ''
+            if self.dict_na_allocation:
+                if self.dict_na_allocation['SecurityAccountsNetAssetAllocation']:
+                    if accttype == 'faccts':
+                        continue
+                    acctsrc = acctidbymxz.split('_')[2]
+                    dict_broker_info = self.gv.col_broker_info.find_one(
+                        {'DataDate': self.str_today, 'BrokerAbbr': acctsrc}
+                    )
+                    broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
+                    if accttype == 'c':
+                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                        str_order_position = f'{broker_alias_in_trdplan}普通户目标持仓{round(tgtpst/500000)*50}万'
+                    elif accttype == 'm':
+                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                        str_order_position = f'{broker_alias_in_trdplan}信用户目标持仓{round(tgtpst/500000)*50}万'
+                    elif accttype == 'faccts':
+                        iclots = dict_bgt_by_acctidbymxz['ICLots']
+                        if iclots:
+                            iclots_abs = abs(iclots)
+                            if iclots > 0:
+                                ls_mark = '多'
+                            else:
+                                ls_mark = '空'
+                            str_order_position = f'{iclots_abs}手IC{ls_mark}头'  # todo 补充期货变动手数，需建立期货持仓汇总表
+                else:
+                    if accttype == 'c':
+                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                        str_order_position = f'普通户目标持仓{round(tgtpst/500000)*50}万,'
+                    elif accttype == 'm':
+                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                        str_order_position = f'信用户目标持仓{round(tgtpst/500000)*50}万,'
+                    elif accttype == 'faccts':
+                        iclots = dict_bgt_by_acctidbymxz['ICLots']
+                        if iclots:
+                            iclots_abs = abs(iclots)
+                            if iclots > 0:
+                                ls_mark = '多'
+                            else:
+                                ls_mark = '空'
+                            str_order_position = f'{iclots_abs}手IC{ls_mark}头,'  # todo 补充期货变动手数，需建立期货持仓汇总表
+            else:
+                if accttype == 'c':
+                    tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                    str_order_position = f'普通户目标持仓{tgtpst},'
+                elif accttype == 'm':
+                    tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                    str_order_position = f'信用户目标持仓{tgtpst},'
+                elif accttype == 'faccts':
+                    iclots = dict_bgt_by_acctidbymxz['ICLots']
+                    if iclots:
+                        iclots_abs = abs(iclots)
+                        if iclots > 0:
+                            ls_mark = '多'
+                        else:
+                            ls_mark = '空'
+                        str_order_position = f'{iclots_abs}手IC{ls_mark}头'  # todo 补充期货变动手数，需建立期货持仓汇总表
+            list_str_orders_position.append(str_order_position)
+
+        signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
+
+        str_orders_position = '\n'.join(list_str_orders_position)
+
+        list_dicts_dwitems = list(
+            self.gv.db_trddata['manually_patchdata_dwitems'].find(
+                {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+            )
+        )
+        str_dwitems = ''
+        for dict_dwitems in list_dicts_dwitems:
+            dwtype = dict_dwitems['DWItem']
+            if dwtype == 'P':
+                str_dwtype_display = '申购'
+            elif dwtype == 'R':
+                str_dwtype_display = '赎回'
+            elif dwtype == 'DD':
+                str_dwtype_display = '分红'
+            else:
+                str_dwtype_display = dwtype
+            dwbgt_net_amt = round(dict_dwitems['DWBGTNetAmt']/10000)
+            str_confirmation_date = dict_dwitems['UNAVConfirmationDate']
+            str_expected_dwdate = dict_dwitems['ExpectedDWDate']
+            str_dwitems += (f'{str_dwtype_display}{dwbgt_net_amt}万, 按照{str_confirmation_date}净值 '
+                            f'{str_expected_dwdate}划款.  \n')
+
+        accrued_performance_compensation_according_to_alpha_mark = self.dict_prdinfo['超额计提']
+        if accrued_performance_compensation_according_to_alpha_mark:
+            str_apcata_mark = 'y'
+        else:
+            str_apcata_mark = ''
+
+        dict_holding_aggr = self.gv.col_facct_holding_aggr_by_prdcode.find_one(
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+        )['holding_aggr_by_prdcode']
+
+        # 当前期指持仓
+        str_future_index = ''
+        for key, value in dict_holding_aggr.items():
+            if value > 0:
+                str_future_index_delta = f'{abs(value)}手{key}多头\n'
+            elif value < 0:
+                str_future_index_delta = f'{abs(value)}手{key}空头\n'
+            else:
+                str_future_index_delta = ''
+            str_future_index += str_future_index_delta
+
+        # 当前股票持仓
+        list_dicts_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find(
+            {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+        )
+        str_cpslongamt = ''
+        for dict_bs_by_acctidbymxz in list_dicts_bs_by_acctidbymxz:
+            acctidbymxz = dict_bs_by_acctidbymxz['AcctIDByMXZ']
+            accttype = acctidbymxz.split('_')[1]
+            broker_abbr = acctidbymxz.split('_')[2]
+            if accttype == 'c':
+                cpslongamt_rounded = round(dict_bs_by_acctidbymxz['CompositeLongAmt'] / 500000) * 50
+                if cpslongamt_rounded == 0:
+                    continue
+                str_cpslongamt_delta = (f'{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}'
+                                        f'普通户{cpslongamt_rounded}万\n')
+            elif accttype == 'm':
+                cpslongamt_rounded = round(dict_bs_by_acctidbymxz['CompositeLongAmt'] / 500000) * 50
+                if cpslongamt_rounded == 0:
+                    continue
+                str_cpslongamt_delta = (f'{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}'
+                                        f'信用户{cpslongamt_rounded}万\n')
+            else:
+                str_cpslongamt_delta = ''
+            str_cpslongamt += str_cpslongamt_delta
+
+        dict_trdplan_orders2gv = {
+            '产品代码': self.prdcode,
+            '证券自动交易': '',  # todo 到内网机读取昨日数据并填写
+            '期货自动交易': '',  # todo 到内网机读取昨日数据并填写
+            '产品名称': self.prdname,
+            '总规模': f'{round(self.prd_approximate_na/10000)}',
+            '最新净值': f'{round(self.latest_rptunav, 4)}',
+            '信号': signals_on_trdplan,
+            '今资金划转计划': str_orders_capital,
+            '今资金划转执行': '',
+            '明资金划转计划': '',
+            '今组合交易计划': str_orders_position,
+            '今组合交易执行': '',
+            '明组合交易计划': str_dwitems,
+            '注意事项': '',
+            '超额计提': str_apcata_mark,
+            '当前股票持仓': str_cpslongamt,
+            '当前期指持仓': str_future_index,
+            '备注': '',
+        }
+        self.gv.list_dicts_trdplan_output.append(dict_trdplan_orders2gv)
 
 
 class Account(Product):
@@ -1634,19 +2026,30 @@ class MainFrameWork:
         self.gv = GlobalVariable()
         self.list_prdcodes = self.gv.list_prdcodes
 
+    def generate_excel(self):
+        df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output)
+        fn_trdplan = f'data/trdplan_auto/交易计划mxz-{self.gv.str_today}.xlsx'
+        with pd.ExcelWriter(fn_trdplan) as writer:
+            df_trdplan.to_excel(writer, sheet_name='交易计划', index=False)
+            worksheet_trdplan = writer.sheets['交易计划']
+            worksheet_trdplan.set_column('A:C', 7)
+            worksheet_trdplan.set_column('D:D', 14.25)
+            worksheet_trdplan.set_column('E:F', 8.5)
+            worksheet_trdplan.set_column('G:G', 12)
+            worksheet_trdplan.set_column('H:H', 23)
+            writer.save()
+
     def run(self):
         for prdcode in self.list_prdcodes:
             prd = Product(self.gv, prdcode)
             prd.budget()
+            prd.output_trdplan_order()
             prd.check_exception()
             prd.check_exposure()
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
-        # self.gv.db_trddata['items_budget'].delete_many({'DataDate': self.gv.str_today})
-        # self.gv.db_trddata['items_budget'].insert_many(self.gv.list_items_budget)
-        # self.gv.db_trddata['items_budget_details'].delete_many({'DataDate': self.gv.str_today})
-        # self.gv.db_trddata['items_budget_details'].insert_many(self.gv.list_items_budget_details)
+        self.generate_excel()
 
 
 if __name__ == '__main__':

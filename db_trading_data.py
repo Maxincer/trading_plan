@@ -75,7 +75,7 @@ class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
         w.start()
-        self.str_last_trddate = w.tdaysoffset(-1, "2020-07-26", "").Data[0][0].strftime('%Y%m%d')
+        self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
         self.client_mongo = pymongo.MongoClient('mongodb://localhost:27017/')
         self.db_trddata = self.client_mongo['trddata']
@@ -88,6 +88,8 @@ class DBTradingData:
         self.col_fmtted_dwitems = self.db_trddata['fmtted_dwitems']
         self.col_manually_patchdata_dwitems = self.db_trddata['manually_patchdata_dwitems']
         self.col_na_allocation = self.db_trddata['na_allocation']
+        self.col_bs_by_prdcode = self.db_trddata['b/s_by_prdcode']
+        self.col_tgtna_by_prdcode = self.db_trddata['tgtna_by_prdcode']
 
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
@@ -409,6 +411,8 @@ class DBTradingData:
                                                                    'AcctIDByMXZ': acctidbymxz})
                 if list_future_data_holding:
                     self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
+
+            # todo 可用线程搞定
             sleep(1)
             dict_res_trdrec = trader.query_trading()
             if dict_res_trdrec['success']:
@@ -619,11 +623,14 @@ class DBTradingData:
         6. DW事项可在任意节点强制取消，故由人控制状态码，此步不可少
             
         """
-
         # 读取清算净值数据：
         # \\192.168.4.121\data\Final_new\20200724
         fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
                                              f'######产品净值相关信息######.xlsx')
+        if not os.path.exists(fpath_df_unav_from_4121_final_new):
+            fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_last_trddate}/'
+                                                 f'######产品净值相关信息######.xlsx')
+
         # 注意读取的最新日期有可能会改变格式，目前为-
         df_unav_from_4121_final_new = pd.read_excel(
             fpath_df_unav_from_4121_final_new,
@@ -651,6 +658,7 @@ class DBTradingData:
                 'Status': int,
                 'DWedAmt': float,
                 'EffectiveDate': str,
+                'UNAVConfirmationDate': str,
             }
         )
         df_datapatch_dwitems_read_excel = (df_datapatch_dwitems_read_excel
@@ -662,7 +670,11 @@ class DBTradingData:
             unav_on_confirmation_date = None
             latest_unav_in_final_new = None
             prdcode = dict_dwitems_read_excel['PrdCode']
+            dict_prdinfo = self.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': prdcode})
+            prdcode_in_4121_final_new = dict_prdinfo['PrdCodeIn4121FinalNew']
             dwamt = dict_dwitems_read_excel['Amt']
+            if dwamt is None:
+                dwamt = 0
             dwshares = dict_dwitems_read_excel['Shares']
             dwed_amt = dict_dwitems_read_excel['DWedAmt']
             if not dwed_amt:
@@ -671,12 +683,11 @@ class DBTradingData:
                 dwshares = 0
             for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
                 prdcode_in_final_new = dict_unav_from_4121_final_new['产品编号']
-                latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
-                latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
-                if prdcode_in_final_new == prdcode:
+                if prdcode_in_final_new == prdcode_in_4121_final_new:
+                    latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
+                    latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
                     dict_dwitems_read_excel['LatestUNAVRptDate'] = latest_unav_date_in_final_new
                     dict_dwitems_read_excel['LatestRptUNAV'] = latest_unav_in_final_new
-
                     if unav_confirmation_date <= latest_unav_date_in_final_new:
                         dict_prdinfo = self.col_prdinfo.find_one(
                             {'DataDate': unav_confirmation_date, 'PrdCodeIn4121FinalNew': prdcode_in_final_new}
@@ -1548,6 +1559,93 @@ class DBTradingData:
             self.db_trddata['exposure_analysis_by_prdcode'].insert_many(list_dicts_exposure_analysis_by_prdcode)
         print('Update b/s by prdcode and exposure analysis by prdcode finished')
 
+    def update_faccts_holding_aggr(self):
+        list_dicts_acctinfo_faccts = list(
+            self.col_acctinfo.find({'AcctType': 'f', 'RptMark': 1, 'DataDate': self.str_today})
+        )
+        list_dicts_pstaggr_facct = []
+        set_prdcodes = set()
+        for dict_acctinfo_facct in list_dicts_acctinfo_faccts:
+            acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
+            prdcode = acctidbymxz.split('_')[0]
+            set_prdcodes.add(prdcode)
+            list_dicts_future_api_holding = list(self.db_trddata['future_api_holding'].find(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+            ))
+            set_secids_first_part = set()
+            for dict_future_api_holding in list_dicts_future_api_holding:
+                secid = dict_future_api_holding['instrument_id']
+                secid_first_part = secid[:-4]
+                set_secids_first_part.add(secid_first_part)
+            list_secids_first_part = list(set_secids_first_part)
+            list_secids_first_part.sort()
+
+            dict_secid_first_part2vecqty = {}
+            for secid_first_part in list_secids_first_part:
+                vecqty = 0
+                for dict_future_api_holding in list_dicts_future_api_holding:
+                    direction = dict_future_api_holding['direction']
+                    position = dict_future_api_holding['position']
+                    secid_first_part_in_api_holding = dict_future_api_holding['instrument_id'][:-4]
+                    if direction == 'long':
+                        vecqty_delta = position
+                    elif direction == 'short':
+                        vecqty_delta = - position
+                    else:
+                        raise ValueError('Unknown direction.')
+                    if secid_first_part == secid_first_part_in_api_holding:
+                        vecqty += vecqty_delta
+                dict_secid_first_part2vecqty.update({secid_first_part: vecqty})
+
+            dict_pstaggr_facct = {
+                'DataDate': self.str_today,
+                'AcctIDByMXZ': acctidbymxz,
+                'PrdCode': prdcode,
+                'holding_aggr_by_secid_first_part': dict_secid_first_part2vecqty,
+            }
+            list_dicts_pstaggr_facct.append(dict_pstaggr_facct)
+
+        self.db_trddata['facct_holding_aggr_by_acctidbymxz'].delete_many({'DataDate': self.str_today})
+        if list_dicts_pstaggr_facct:
+            self.db_trddata['facct_holding_aggr_by_acctidbymxz'].insert_many(list_dicts_pstaggr_facct)
+
+        list_prdcodes = list(set_prdcodes)
+        list_prdcodes.sort()
+        list_facct_holding_aggr_by_prdcode = []
+        for prdcode in list_prdcodes:
+            set_secids_first_part_by_prdcode = set()
+            for dict_pstaggr_facct in list_dicts_pstaggr_facct:
+                if prdcode == dict_pstaggr_facct['PrdCode']:
+                    list_secids_first_part_by_prdcode = dict_pstaggr_facct['holding_aggr_by_secid_first_part'].keys()
+                    for _ in list_secids_first_part_by_prdcode:
+                        set_secids_first_part_by_prdcode.add(_)
+            list_secids_first_part_by_prdcode = list(set_secids_first_part_by_prdcode)
+            list_secids_first_part_by_prdcode.sort()
+            dict_pstaggr_facct_by_prdcode = {}
+            for secid_first_part_by_prdcode in list_secids_first_part_by_prdcode:
+                vecqty = 0
+                for dict_pstaggr_facct in list_dicts_pstaggr_facct:
+                    if prdcode == dict_pstaggr_facct['PrdCode']:
+                        if secid_first_part_by_prdcode in dict_pstaggr_facct['holding_aggr_by_secid_first_part']:
+                            vecqty_delta = (
+                                dict_pstaggr_facct['holding_aggr_by_secid_first_part'][secid_first_part_by_prdcode]
+                            )
+                        else:
+                            vecqty_delta = 0
+                        vecqty += vecqty_delta
+                dict_pstaggr_facct_by_prdcode.update({secid_first_part_by_prdcode: vecqty})
+            dict_facct_holding_aggr_by_prdcode = {
+                'DataDate': self.str_today,
+                'PrdCode': prdcode,
+                'holding_aggr_by_prdcode': dict_pstaggr_facct_by_prdcode,
+            }
+            list_facct_holding_aggr_by_prdcode.append(dict_facct_holding_aggr_by_prdcode)
+
+        self.db_trddata['facct_holding_aggr_by_prdcode'].delete_many({'DataDate': self.str_today})
+        if list_facct_holding_aggr_by_prdcode:
+            self.db_trddata['facct_holding_aggr_by_prdcode'].insert_many(list_facct_holding_aggr_by_prdcode)
+        print('Update holding_aggr_by_acctidbymxz and facct_holding_aggr_by_prdcode finished')
+
     def update_col_tgtna_by_prdcode(self):
         """
         这个表处理所有产品的目标净资产。
@@ -1560,21 +1658,57 @@ class DBTradingData:
         todo
             1. 可拓展各渠道的净资产
         """
-        
+        list_dicts_tgtna_by_prdcode = []
+        list_dicts_prdinfo = self.col_prdinfo.find({'DataDate': self.str_today, 'RptMark': 1})
+        for dict_prdinfo in list_dicts_prdinfo:
+            prdcode = dict_prdinfo['PrdCode']
+            dict_bs_by_prdcode = self.col_bs_by_prdcode.find_one(
+                {'PrdCode': prdcode, 'DataDate': self.str_today}
+            )
+            approximate_na = dict_bs_by_prdcode['ApproximateNetAsset']
+            list_dicts_manually_patchdata_dwitems = list(
+                self.col_manually_patchdata_dwitems.find(
+                    {'DataDate': self.str_today, 'PrdCode': prdcode}
+                )
+            )
+            amt2dw_by_prdcode = 0
+            for dict_manually_patchdata_dwitems in list_dicts_manually_patchdata_dwitems:
+                dwbgt_netamt2dw = dict_manually_patchdata_dwitems['DWBGTNetAMT2DW']
+                status = dict_manually_patchdata_dwitems['Status']
+                if status in [2, 3]:
+                    amt2dw_by_prdcode += dwbgt_netamt2dw
 
+            dict_tgt_items = dict_prdinfo['TargetItems']
+            designated_na = None
+            if dict_tgt_items:
+                if dict_tgt_items['NetAsset']:
+                    designated_na = dict_tgt_items['NetAsset']
 
-        self.prdna_tgt = self.prd_approximate_na
-        if self.dict_tgt_items:
-            if self.dict_tgt_items['NetAsset']:
-                self.prdna_tgt = self.dict_tgt_items['NetAsset']
+            if designated_na:
+                tgtprdna = designated_na
+            else:
+                tgtprdna = approximate_na + amt2dw_by_prdcode
+
+            dict_tgtna_by_prdcode = {
+                'DataDate': self.str_today,
+                'PrdCode': prdcode,
+                'CurrentNAFromInternalData': approximate_na,
+                'Amt2DW': amt2dw_by_prdcode,
+                'TgtNA': tgtprdna,
+            }
+            list_dicts_tgtna_by_prdcode.append(dict_tgtna_by_prdcode)
+        self.col_tgtna_by_prdcode.delete_many({'DataDate': self.str_today})
+        if list_dicts_tgtna_by_prdcode:
+            self.col_tgtna_by_prdcode.insert_many(list_dicts_tgtna_by_prdcode)
 
     def run(self):
         # self.update_trddata_f()
+        self.update_faccts_holding_aggr()
         self.update_rawdata()
         self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
-        self.update_col_tgt_na_by_prdcode()
+        self.update_col_tgtna_by_prdcode()
         self.update_na_allocation()
         print("Database preparation finished.")
 

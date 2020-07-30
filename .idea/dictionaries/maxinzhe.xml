@@ -8,21 +8,26 @@
       <w>acctidsbymxz</w>
       <w>acctinfo</w>
       <w>accts</w>
+      <w>acctsrc</w>
       <w>acctstatus</w>
       <w>accttype</w>
       <w>alldays</w>
       <w>allfaccts</w>
       <w>alphabee</w>
       <w>apporoximate</w>
+      <w>aproximate</w>
       <w>astock</w>
       <w>avgprice</w>
       <w>basicinfo</w>
       <w>bgtamt</w>
+      <w>brokerabbr</w>
+      <w>brokeralias</w>
       <w>bsitem</w>
       <w>cacct</w>
       <w>caccts</w>
       <w>cffex</w>
       <w>cmacct</w>
+      <w>cmname</w>
       <w>colfind</w>
       <w>colname</w>
       <w>colunms</w>
@@ -31,6 +36,7 @@
       <w>cpslongamt</w>
       <w>cpspct</w>
       <w>cpsshortamt</w>
+      <w>cpsttrdstarttime</w>
       <w>datadate</w>
       <w>datafilepath</w>
       <w>datainline</w>
@@ -40,11 +46,17 @@
       <w>datasourcetype</w>
       <w>dateddate</w>
       <w>dbclient</w>
+      <w>difs</w>
       <w>dirpath</w>
       <w>dupatch</w>
+      <w>dwamt</w>
       <w>dwbgt</w>
+      <w>dwdate</w>
+      <w>dwed</w>
       <w>dwitems</w>
       <w>dwitemsid</w>
+      <w>dwshares</w>
+      <w>dwtype</w>
       <w>ehtc</w>
       <w>etflongamt</w>
       <w>etfshortamt</w>
@@ -75,6 +87,7 @@
       <w>myacctsifo</w>
       <w>myacctsinfo</w>
       <w>myprdsinfo</w>
+      <w>navum</w>
       <w>netamt</w>
       <w>netasset</w>
       <w>netqty</w>
@@ -94,18 +107,22 @@
       <w>prdinfo</w>
       <w>prdna</w>
       <w>prdname</w>
+      <w>pstaggr</w>
       <w>qtyamt</w>
       <w>rawdata</w>
       <w>readlines</w>
       <w>recdata</w>
       <w>rptaccts</w>
+      <w>rptdate</w>
       <w>rptmark</w>
+      <w>rptunav</w>
       <w>sacct</w>
       <w>saccts</w>
       <w>secaccts</w>
       <w>seccode</w>
       <w>secdebt</w>
       <w>secid</w>
+      <w>secids</w>
       <w>secidsrc</w>
       <w>secliability</w>
       <w>secmb</w>
@@ -128,9 +145,12 @@
       <w>szse</w>
       <w>tgtitems</w>
       <w>tgtna</w>
+      <w>tgtprdna</w>
+      <w>tgtpst</w>
       <w>trdclient</w>
       <w>trddata</w>
       <w>trddate</w>
+      <w>trdplan</w>
       <w>trdrec</w>
       <w>ttasset</w>
       <w>ttliability</w>
@@ -141,6 +161,7 @@
       <w>underlyingsec</w>
       <w>underlyingsecid</w>
       <w>underlyingsecsrc</w>
+      <w>vecqty</w>
       <w>wcode</w>
       <w>wcodes</w>
       <w>windcode</w>
