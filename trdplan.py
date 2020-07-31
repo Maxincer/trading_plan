@@ -124,6 +124,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
+        self.str_today = '20200730'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -151,6 +152,7 @@ class GlobalVariable:
         self.list_items_budget = []
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
+        self.str_next_trddate = w.tdaysoffset(1, self.str_today, '').Data[0][0].strftime('%Y%m%d')
         set_ic_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014872000000").Data[1])
         set_if_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=a599010102000000").Data[1])
         set_ih_windcode = set(w.wset("sectorconstituent", f"date={self.str_today};sectorid=1000014871000000").Data[1])
@@ -1607,13 +1609,13 @@ class Product:
                                 str_order_capital = (
                                     f'{dict_accttype2natual_language[accttype]}'
                                     f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
-                                    f'{capital_dif_round}万'
+                                    f'{abs(capital_dif_round)}万'
                                 )
                             elif capital_dif_round < 0:
                                 str_order_capital = (
                                     f'银转{dict_accttype2natual_language[accttype]}'
                                     f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}'
-                                    f'{capital_dif_round}万'
+                                    f'{abs(capital_dif_round)}万'
                                 )
                             else:
                                 str_order_capital = ''
@@ -1621,14 +1623,14 @@ class Product:
                             str_order_capital = (
                                 f'{dict_accttype2natual_language[accttype]}'
                                 f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
-                                f'{capital_dif_round}万'
+                                f'{abs(capital_dif_round)}万'
                             )
                     else:
                         if accttype == 'f':
                             if capital_dif_round > 0:
-                                str_order_capital = f'期转银{capital_dif_round}万'
+                                str_order_capital = f'期转银{abs(capital_dif_round)}万'
                             elif capital_dif_round < 0:
-                                str_order_capital = f'银转期{capital_dif_round}万'
+                                str_order_capital = f'银转期{abs(capital_dif_round)}万'
                             else:
                                 str_order_capital = ''
                         else:
@@ -1637,13 +1639,13 @@ class Product:
                                     str_order_capital = (
                                         f'{dict_accttype2natual_language[accttype]}'
                                         f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银'
-                                        f'{capital_dif_round}万'
+                                        f'{abs(capital_dif_round)}万'
                                     )
                                 elif capital_dif_round < 0:
                                     str_order_capital = (
                                         f'银转{dict_accttype2natual_language[accttype]}'
                                         f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}'
-                                        f'{capital_dif_round}万'
+                                        f'{abs(capital_dif_round)}万'
                                     )
                                 else:
                                     str_order_capital = ''
@@ -1652,13 +1654,13 @@ class Product:
                                     str_order_capital = (
                                         f'{dict_accttype2natual_language[accttype]}'
                                         f'{dict_accttype2natual_language_with_secsrc[accttype]}转银'
-                                        f'{capital_dif_round}万'
+                                        f'{abs(capital_dif_round)}万'
                                     )
                                 elif capital_dif_round < 0:
                                     str_order_capital = (
                                         f'银转{dict_accttype2natual_language[accttype]}'
                                         f'{dict_accttype2natual_language_with_secsrc[accttype]}'
-                                        f'{capital_dif_round}万'
+                                        f'{abs(capital_dif_round)}万'
                                     )
                                 else:
                                     str_order_capital = ''
@@ -1666,33 +1668,33 @@ class Product:
                     if accttype in ['c', 'm']:
                         if dict_acctinfo_for_m_mark:
                             if capital_dif_round > 0:
-                                str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{capital_dif_round}万'
+                                str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{abs(capital_dif_round)}万'
                             elif capital_dif_round < 0:
-                                str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{capital_dif_round}万'
+                                str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{abs(capital_dif_round)}万'
                             else:
                                 str_order_capital = ''
                         else:
                             if capital_dif_round > 0:
-                                str_order_capital = f'证转银{capital_dif_round}万'
+                                str_order_capital = f'证转银{abs(capital_dif_round)}万'
                             elif capital_dif_round < 0:
-                                str_order_capital = f'银转证{capital_dif_round}万'
+                                str_order_capital = f'银转证{abs(capital_dif_round)}万'
                             else:
                                 str_order_capital = ''
                     elif accttype in ['f']:
                         if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
                             if capital_dif_round > 0:
                                 str_order_capital = (f'期{dict_accttype2natual_language_with_secsrc[accttype]}转银'
-                                                     f'{capital_dif_round}万')
+                                                     f'{abs(capital_dif_round)}万')
                             elif capital_dif_round < 0:
                                 str_order_capital = (f'银转期{dict_accttype2natual_language_with_secsrc[accttype]}'
-                                                     f'{capital_dif_round}万')
+                                                     f'{abs(capital_dif_round)}万')
                             else:
                                 str_order_capital = ''
                         else:
                             if capital_dif_round > 0:
-                                str_order_capital = f'期转银{capital_dif_round}万'
+                                str_order_capital = f'期转银{abs(capital_dif_round)}万'
                             elif capital_dif_round < 0:
-                                str_order_capital = f'银转期{capital_dif_round}万'
+                                str_order_capital = f'银转期{abs(capital_dif_round)}万'
                             else:
                                 str_order_capital = ''
                     else:
@@ -1701,30 +1703,31 @@ class Product:
                 if accttype in ['c', 'm']:
                     if dict_acctinfo_for_m_mark:
                         if capital_dif_round > 0:
-                            str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{capital_dif_round}万'
+                            str_order_capital = f'证{dict_accttype2cmname[accttype]}转银{abs(capital_dif_round)}万'
                         elif capital_dif_round < 0:
-                            str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{capital_dif_round}万'
+                            str_order_capital = f'银转证{dict_accttype2cmname[accttype]}{abs(capital_dif_round)}万'
                         else:
                             str_order_capital = ''
                     else:
                         if capital_dif_round > 0:
-                            str_order_capital = f'证转银{capital_dif_round}万'
+                            str_order_capital = f'证转银{abs(capital_dif_round)}万'
                         elif capital_dif_round < 0:
-                            str_order_capital = f'银转证{capital_dif_round}万'
+                            str_order_capital = f'银转证{abs(capital_dif_round)}万'
                         else:
                             str_order_capital = ''
                 elif accttype in ['f']:
                     if capital_dif_round > 0:
-                        str_order_capital = f'期转银{capital_dif_round}万'
+                        str_order_capital = f'期转银{abs(capital_dif_round)}万'
                     elif capital_dif_round < 0:
-                        str_order_capital = f'银转期{capital_dif_round}万'
+                        str_order_capital = f'银转期{abs(capital_dif_round)}万'
                     else:
                         str_order_capital = ''
                 else:
                     raise ValueError('Unknown accttype')
-            if capital_dif_round > 50:
+
+            if capital_dif_round > 0:
                 list_str_orders_capital_outflow.append(str_order_capital)
-            elif capital_dif_round < -50:
+            elif capital_dif_round < 0:
                 list_str_orders_capital_inflow.append(str_order_capital)
             else:
                 pass
@@ -1734,12 +1737,28 @@ class Product:
         )
         for dict_bs_by_acctidbymxz in list_dicts_bs_by_acctidbymxz:
             acctidbymxz_in_bs = dict_bs_by_acctidbymxz['AcctIDByMXZ']
+            approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
             dict_bgt_by_acctidbymxz = self.gv.col_bgt_by_acctidbymxz.find_one(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_in_bs}
             )
+
             if dict_bgt_by_acctidbymxz is None:
-                str_order_capital = f'{acctidbymxz_in_bs}转银全部,'
-                list_str_orders_capital_outflow.append(str_order_capital)
+                if approximate_na > 0:
+                    accttype = acctidbymxz_in_bs.split('_')[1]
+                    if accttype in ['o']:
+                        continue
+                    broker_abbr = acctidbymxz_in_bs.split('_')[2]
+                    dict_accttype2natual_language = {'c': '证', 'm': '证', 'f': '期'}
+                    dict_accttype2natual_language_with_secsrc_and_cmname = {
+                        'c': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}普通）',
+                        'm': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}信用）',
+                        'f': f'（{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}）'
+                    }
+                    str_order_capital = (
+                        f'{dict_accttype2natual_language[accttype]}'
+                        f'{dict_accttype2natual_language_with_secsrc_and_cmname[accttype]}转银全部'
+                    )
+                    list_str_orders_capital_outflow.append(str_order_capital)
         list_str_orders_capital_outflow.sort()
         list_str_orders_capital_inflow.sort()
         list_str_orders_capital = list_str_orders_capital_outflow + list_str_orders_capital_inflow
@@ -1883,8 +1902,8 @@ class Product:
 
         dict_trdplan_orders2gv = {
             '产品代码': self.prdcode,
-            '证券自动交易': '',  # todo 到内网机读取昨日数据并填写
-            '期货自动交易': '',  # todo 到内网机读取昨日数据并填写
+            '证券自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
+            '期货自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
             '产品名称': self.prdname,
             '总规模': f'{round(self.prd_approximate_na/10000)}',
             '最新净值': f'{round(self.latest_rptunav, 4)}',
@@ -2027,16 +2046,64 @@ class MainFrameWork:
         self.list_prdcodes = self.gv.list_prdcodes
 
     def generate_excel(self):
-        df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output)
-        fn_trdplan = f'data/trdplan_auto/交易计划mxz-{self.gv.str_today}.xlsx'
+        df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
+        fn_trdplan = f'data/trdplan_auto/交易计划mxz-{self.gv.str_next_trddate}.xlsx'
         with pd.ExcelWriter(fn_trdplan) as writer:
-            df_trdplan.to_excel(writer, sheet_name='交易计划', index=False)
+            df_trdplan.to_excel(writer, sheet_name='交易计划', index=False, header=False)
             worksheet_trdplan = writer.sheets['交易计划']
-            worksheet_trdplan.set_column('A:C', 7)
-            worksheet_trdplan.set_column('D:D', 14.25)
-            worksheet_trdplan.set_column('E:F', 8.5)
-            worksheet_trdplan.set_column('G:G', 12)
-            worksheet_trdplan.set_column('H:H', 23)
+            fmt_header = writer.book.add_format(
+                {
+                    'font_name': '宋体',
+                    'font_size': 11,
+                    'bold': False,
+                    'border': 1,
+                    'align': 'center',
+                    'valign': 'vcenter',
+                    'text_wrap': True,
+                }
+            )
+            fmt1 = writer.book.add_format(
+                {
+                    'valign': 'vcenter',
+                    'bold': False,
+                    'text_wrap': True,
+                    'bg_color': '#00B0F0',
+                    'border': 1,
+                    'align': 'left',
+                }
+            )
+
+            fmt2 = writer.book.add_format(
+                {
+                    'valign': 'vcenter',
+                    'text_wrap': True,
+                    'bg_color': '#A6A6A6',
+                    'border': 1,
+                    'align': 'left',
+                }
+            )
+            fmt_first_col = writer.book.add_format(
+                {
+                    'valign': 'vcenter',
+                    'bold': True,
+                    'italic': True,
+                    'text_wrap': True,
+                    'bg_color': '#00B0F0',
+                    'border': 1,
+                    'align': 'right',
+                }
+            )
+            worksheet_trdplan.set_column('B:C', 7, fmt1)
+            worksheet_trdplan.set_column('D:D', 14.25, fmt1)
+            worksheet_trdplan.set_column('E:F', 8.5, fmt1)
+            worksheet_trdplan.set_column('G:G', 12, fmt1)
+            worksheet_trdplan.set_column('H:J', 28.25, fmt2)
+            worksheet_trdplan.set_column('K:M', 46.63, fmt1)
+            worksheet_trdplan.set_column('A:A', 8.38, fmt_first_col)
+            worksheet_trdplan.set_row(0, 31.5, fmt_header)
+            worksheet_trdplan.autofilter(0, 0, 0, 17)
+            for idx in range(1, 40):
+                worksheet_trdplan.set_row(idx, 80)
             writer.save()
 
     def run(self):
