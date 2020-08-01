@@ -37,6 +37,7 @@
       <w>cpslongamt</w>
       <w>cpspct</w>
       <w>cpsshortamt</w>
+      <w>cpstrd</w>
       <w>cpsttrdstarttime</w>
       <w>datadate</w>
       <w>datafilepath</w>
@@ -140,6 +141,7 @@
       <w>shortselling</w>
       <w>skiprows</w>
       <w>srcs</w>
+      <w>starttime</w>
       <w>startvalue</w>
       <w>swapamt</w>
       <w>swhy</w>

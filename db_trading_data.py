@@ -74,6 +74,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
+        self.str_today = '20200731'
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -1554,6 +1555,23 @@ class DBTradingData:
         df_exposure_analysis_by_prdcode['NetExposure(%)'] = (df_exposure_analysis_by_prdcode['NetExposure']
                                                              / df_exposure_analysis_by_prdcode['ApproximateNetAsset'])
         list_dicts_exposure_analysis_by_prdcode = df_exposure_analysis_by_prdcode.to_dict('records')
+        for dict_exposure_analysis_by_prdcode in list_dicts_exposure_analysis_by_prdcode:
+            prdcode = dict_exposure_analysis_by_prdcode['PrdCode']
+            dict_prdinfo = self.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': prdcode})
+            if dict_prdinfo is None:  # todo 需要再考虑
+                continue
+            dict_strategies_allocation = dict_prdinfo['StrategiesAllocation']
+            prd_approximate_na = dict_exposure_analysis_by_prdcode['ApproximateNetAsset']
+            net_exposure_amt = dict_exposure_analysis_by_prdcode['NetExposure']
+            net_exposure_pct_tgt = (
+                    0.99 * dict_strategies_allocation['EI'] + 0 * dict_strategies_allocation['MN']
+            )
+            net_exposure_amt_tgt = net_exposure_pct_tgt * prd_approximate_na
+            dif_net_exposure_amt = net_exposure_amt - net_exposure_amt_tgt
+            dict_exposure_analysis_by_prdcode['NetExposure(%)Tgt'] = net_exposure_pct_tgt
+            dict_exposure_analysis_by_prdcode['NetExposureTgt'] = net_exposure_amt_tgt
+            dict_exposure_analysis_by_prdcode['NetExposureDif'] = dif_net_exposure_amt
+
         self.db_trddata['exposure_analysis_by_prdcode'].delete_many({'DataDate': self.str_today})
         if list_dicts_exposure_analysis_by_prdcode:
             self.db_trddata['exposure_analysis_by_prdcode'].insert_many(list_dicts_exposure_analysis_by_prdcode)

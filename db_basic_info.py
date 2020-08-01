@@ -66,7 +66,7 @@ class DatabaseBasicInfo:
                                        'PrdCode': str,
                                        'PrdName': str,
                                        'SignalsOnTrdPlan': str,
-                                       'CptTrdStartTime': str,
+                                       'CpsTrdStartTime': str,
                                        'PrdCodeIn4121FinalNew': str,
                                        'StrategiesAllocation': str,
                                        'NetAssetAllocation': str,

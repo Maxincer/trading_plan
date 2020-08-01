@@ -207,22 +207,17 @@ class Product:
         self.iter_col_acctinfo_find = (self.gv.col_acctinfo
                                        .find({'PrdCode': self.prdcode, 'RptMark': 1, 'DataDate': self.str_today}))
         self.dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
-        dict_exposure_analysis_by_prdcode = (self.gv.col_exposure_analysis_by_prdcode
-                                             .find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today}))
+        self.dict_exposure_analysis_by_prdcode = (
+            self.gv.col_exposure_analysis_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
+        )
         self.dict_prdinfo = self.gv.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         self.prdname = self.dict_prdinfo['PrdName']
         self.signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
         self.str_cpsttrdstarttime = self.dict_prdinfo['CptTrdStartTime']
-        if self.dict_prdinfo['StrategiesAllocation']:
-            self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
-        else:
-            self.dict_strategies_allocation = None
+        self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         self.dict_na_allocation = self.gv.col_na_allocation.find_one({'PrdCode': prdcode, 'DataDate': self.str_today})
         self.tgt_cpspct = self.dict_prdinfo['TargetCompositePercentage']
         self.dict_tgt_items = self.dict_prdinfo['TargetItems']
-        self.prd_long_exposure = dict_exposure_analysis_by_prdcode['LongExposure']
-        self.prd_short_exposure = dict_exposure_analysis_by_prdcode['ShortExposure']
-        self.prd_net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
         self.prd_approximate_na = self.dict_bs_by_prdcode['ApproximateNetAsset']
         self.prd_ttasset = self.dict_bs_by_prdcode['TotalAsset']
         self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
@@ -1769,10 +1764,25 @@ class Product:
         list_str_orders_capital = list_str_orders_capital_outflow + list_str_orders_capital_inflow
         str_orders_capital = '\n'.join(list_str_orders_capital)
 
-        # 目标持仓及期指
+        # 今组合交易计划 - 对下午交易的产品调整敞口
+        # 逻辑：在下午有交易开始时间的产品，在开盘时使用期指调整敞口，并对交易端进行监控
+        cpstrd_starttime = self.dict_prdinfo['CpsTrdStartTime']
+        list_cpstrd_starttime = cpstrd_starttime.split(',')
+        exposure_check_mark = 0
+        for cpstrd_starttime in list_cpstrd_starttime:
+            if cpstrd_starttime >= '113000':
+                exposure_adjust_mark = 1
+        if exposure_check_mark:
+            net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
+            iclots_rounded2adjust_exposure = round(net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot)
+            # todo 需要检查期货户资金是否充足
+            # todo ??
+            if iclots_rounded2adjust_exposure:
+                pass
+
+        # 今组合交易计划 - 目标持仓及期指
         # todo 期指开平仓 delta 计算 及表述
 
-        list_str_orders_position = []
         list_str_orders_position_saccts = []
         list_str_orders_position_faccts_sum_part = []
         list_str_orders_position_faccts_bracket_part = []
