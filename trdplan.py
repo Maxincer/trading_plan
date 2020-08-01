@@ -124,7 +124,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200730'
+        self.str_today = '20200731'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -187,7 +187,10 @@ class GlobalVariable:
         self.col_broker_info = self.db_basicinfo['broker_info']
         self.list_dicts_trdplan_output = []
         self.col_facct_holding_aggr_by_prdcode = self.db_trddata['facct_holding_aggr_by_prdcode']
+        self.col_facct_holding_aggr_by_acctidbymxz = self.db_trddata['facct_holding_aggr_by_acctidbymxz']
         self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
+        self.col_trdplan_output = self.db_trddata['trdplan_output']
+        # todo 以下代码需要改进
         self.dict_broker_abbr2broker_alias = {}
         for dict_broker_info in self.list_dicts_broker_info:
             brokerabbr = dict_broker_info['BrokerAbbr']
@@ -1565,7 +1568,9 @@ class Product:
         """
         # 今资金划转计划
         list_dicts_bgt_by_acctidbymxz = list(
-            self.gv.col_bgt_by_acctidbymxz.find({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+            self.gv.col_bgt_by_acctidbymxz
+                .find({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+                .sort('AcctIDByMXZ', pymongo.ASCENDING)
         )
         list_str_orders_capital_outflow = []
         list_str_orders_capital_inflow = []
@@ -1765,73 +1770,239 @@ class Product:
         str_orders_capital = '\n'.join(list_str_orders_capital)
 
         # 目标持仓及期指
+        # todo 期指开平仓 delta 计算 及表述
+
         list_str_orders_position = []
+        list_str_orders_position_saccts = []
+        list_str_orders_position_faccts_sum_part = []
+        list_str_orders_position_faccts_bracket_part = []
+
         for dict_bgt_by_acctidbymxz in list_dicts_bgt_by_acctidbymxz:
             acctidbymxz = dict_bgt_by_acctidbymxz['AcctIDByMXZ']
+            prdcode = acctidbymxz.split('_')[0]
             accttype = acctidbymxz.split('_')[1]
-            str_order_position = ''
-            if self.dict_na_allocation:
-                if self.dict_na_allocation['SecurityAccountsNetAssetAllocation']:
-                    if accttype == 'faccts':
-                        continue
-                    acctsrc = acctidbymxz.split('_')[2]
-                    dict_broker_info = self.gv.col_broker_info.find_one(
-                        {'DataDate': self.str_today, 'BrokerAbbr': acctsrc}
-                    )
-                    broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
-                    if accttype == 'c':
-                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                        str_order_position = f'{broker_alias_in_trdplan}普通户目标持仓{round(tgtpst/500000)*50}万'
-                    elif accttype == 'm':
-                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                        str_order_position = f'{broker_alias_in_trdplan}信用户目标持仓{round(tgtpst/500000)*50}万'
-                    elif accttype == 'faccts':
-                        iclots = dict_bgt_by_acctidbymxz['ICLots']
-                        if iclots:
-                            iclots_abs = abs(iclots)
-                            if iclots > 0:
-                                ls_mark = '多'
+            dict_accttype2broker_type = {'c': 's', 'm': 's', 'f': 'f'}
+            dict_acctinfo_for_t_mark = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz, 'AcctStatus': 'T'}
+            )
+            if accttype in ['c', 'm']:
+                broker_abbr = acctidbymxz.split('_')[2]
+                dict_acctinfo_for_m_mark = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctType': 'm', 'PrdCode': prdcode, 'BrokerAbbr': broker_abbr}
+                )
+                broker_type = dict_accttype2broker_type[accttype]
+                dict_broker_info = self.gv.col_broker_info.find_one(
+                    {'DataDate': self.str_today, 'BrokerAbbr': broker_abbr, 'BrokerType': broker_type}
+                )
+                broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
+                tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                if self.dict_na_allocation:
+                    if self.dict_na_allocation['SecurityAccountsNetAssetAllocation']:
+                        if dict_acctinfo_for_m_mark:
+                            if dict_acctinfo_for_t_mark:
+                                if accttype == 'c':
+                                    str_order_position = (f'{broker_alias_in_trdplan}'
+                                                          f'普通户目标持仓{round(tgtpst/500000)*50}万')
+                                elif accttype == 'm':
+                                    str_order_position = (f'{broker_alias_in_trdplan}'
+                                                          f'信用户目标持仓{round(tgtpst/500000)*50}万')
+                                else:
+                                    raise ValueError('Unknown accttype')
                             else:
-                                ls_mark = '空'
-                            str_order_position = f'{iclots_abs}手IC{ls_mark}头'  # todo 补充期货变动手数，需建立期货持仓汇总表
-                else:
-                    if accttype == 'c':
-                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                        str_order_position = f'普通户目标持仓{round(tgtpst/500000)*50}万,'
-                    elif accttype == 'm':
-                        tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                        str_order_position = f'信用户目标持仓{round(tgtpst/500000)*50}万,'
-                    elif accttype == 'faccts':
-                        iclots = dict_bgt_by_acctidbymxz['ICLots']
-                        if iclots:
-                            iclots_abs = abs(iclots)
-                            if iclots > 0:
-                                ls_mark = '多'
-                            else:
-                                ls_mark = '空'
-                            str_order_position = f'{iclots_abs}手IC{ls_mark}头,'  # todo 补充期货变动手数，需建立期货持仓汇总表
-            else:
-                if accttype == 'c':
-                    tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                    str_order_position = f'普通户目标持仓{tgtpst},'
-                elif accttype == 'm':
-                    tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
-                    str_order_position = f'信用户目标持仓{tgtpst},'
-                elif accttype == 'faccts':
-                    iclots = dict_bgt_by_acctidbymxz['ICLots']
-                    if iclots:
-                        iclots_abs = abs(iclots)
-                        if iclots > 0:
-                            ls_mark = '多'
+                                str_order_position = ''
                         else:
-                            ls_mark = '空'
-                        str_order_position = f'{iclots_abs}手IC{ls_mark}头'  # todo 补充期货变动手数，需建立期货持仓汇总表
-            list_str_orders_position.append(str_order_position)
+                            str_order_position = f'{broker_alias_in_trdplan}目标持仓{round(tgtpst/500000)*50}万'
+                    else:
+                        if dict_acctinfo_for_m_mark:
+                            if dict_acctinfo_for_t_mark:
+                                if accttype == 'c':
+                                    str_order_position = f'普通户目标持仓{round(tgtpst / 500000) * 50}万'
+                                elif accttype == 'm':
+                                    str_order_position = f'信用户目标持仓{round(tgtpst / 500000) * 50}万'
+                                else:
+                                    raise ValueError('Unknown accttype')
+                            else:
+                                str_order_position = ''
+                        else:
+                            str_order_position = f'目标持仓{round(tgtpst / 500000) * 50}万'
+                else:
+                    if dict_acctinfo_for_m_mark:
+                        if dict_acctinfo_for_t_mark:
+                            if accttype == 'c':
+                                str_order_position = f'普通户目标持仓{round(tgtpst / 500000) * 50}万'
+                            elif accttype == 'm':
+                                str_order_position = f'信用户目标持仓{round(tgtpst / 500000) * 50}万'
+                            else:
+                                raise ValueError('Unknown accttype')
+                        else:
+                            str_order_position = ''
+                    else:
+                        str_order_position = f'目标持仓{round(tgtpst / 500000) * 50}万'
+                if str_order_position:
+                    list_str_orders_position_saccts.append(str_order_position)
+
+            # 期指总数部分
+            elif accttype in ['faccts']:
+                dict_facct_holding_aggr_by_prdcode = self.gv.col_facct_holding_aggr_by_prdcode.find_one(
+                    {'DataDate': self.str_today, 'PrdCode': prdcode}
+                )
+                dict_holding_aggr_by_prdcode = dict_facct_holding_aggr_by_prdcode['holding_aggr_by_prdcode']
+                if 'IC' in dict_holding_aggr_by_prdcode:
+                    iclots_in_facct_holding_aggr_by_prdcode = dict_holding_aggr_by_prdcode['IC']
+                else:
+                    iclots_in_facct_holding_aggr_by_prdcode = 0
+
+                iclots_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['ICLots']
+                if iclots_in_bgt_by_acctidbymxz > 0:
+                    if iclots_in_bgt_by_acctidbymxz != iclots_in_facct_holding_aggr_by_prdcode:
+                        str_order_position = f'{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头'
+                    else:
+                        str_order_position = f'equal-{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头'
+
+                elif iclots_in_bgt_by_acctidbymxz < 0:
+                    if iclots_in_bgt_by_acctidbymxz != iclots_in_facct_holding_aggr_by_prdcode:
+                        str_order_position = f'{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头'
+                    else:
+                        str_order_position = f'equal-{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头'
+                else:
+                    # todo 商议表述形式
+                    if iclots_in_facct_holding_aggr_by_prdcode > 0:
+                        str_order_position = '清仓IC多头'
+                    elif iclots_in_facct_holding_aggr_by_prdcode < 0:
+                        str_order_position = '清仓IC空头'
+                    else:
+                        str_order_position = 'equal-清仓IC期指'
+                list_str_orders_position_faccts_sum_part.append(str_order_position)
+
+            # 期指括号内部分
+            elif accttype in ['f']:
+                broker_type = dict_accttype2broker_type[accttype]
+                broker_abbr = acctidbymxz.split('_')[2]
+                dict_broker_info = self.gv.col_broker_info.find_one(
+                    {'DataDate': self.str_today, 'BrokerAbbr': broker_abbr, 'BrokerType': broker_type}
+                )
+                broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
+                dict_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
+                # todo 重要假设：期货空头只使用IC
+                dict_holding_aggr_by_acctidbymxz = (
+                    dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
+                )
+                if 'IC' in dict_holding_aggr_by_acctidbymxz:
+                    iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
+                else:
+                    iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+
+                iclots_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['ICLots']
+                iclots_delta = iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_in_bgt_by_acctidbymxz
+
+                if self.dict_na_allocation:
+                    if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
+                        if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                            if iclots_delta < 0:  # Buy
+                                if iclots_in_bgt_by_acctidbymxz > 0:
+                                    str_order_position = f'{broker_alias_in_trdplan}开{abs(iclots_delta)}手IC多头'
+                                else:
+                                    str_order_position = f'{broker_alias_in_trdplan}平{abs(iclots_delta)}手IC空头'
+                            elif iclots_delta > 0:  # Sell
+                                if iclots_in_bgt_by_acctidbymxz >= 0:
+                                    str_order_position = f'{broker_alias_in_trdplan}平{abs(iclots_delta)}手IC多头'
+                                else:
+                                    str_order_position = f'{broker_alias_in_trdplan}开{abs(iclots_delta)}手IC空头'
+                            else:
+                                str_order_position = ''
+                        else:
+                            if iclots_delta < 0:  # Buy
+                                str_order_position = (
+                                    f'{broker_alias_in_trdplan}'
+                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                    f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
+                            elif iclots_delta > 0:  # Sell
+                                str_order_position = (
+                                    f'{broker_alias_in_trdplan}'
+                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                    f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
+                            else:
+                                str_order_position = ''
+                    else:
+                        if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                            if iclots_delta < 0:  # Buy
+                                if iclots_in_bgt_by_acctidbymxz > 0:
+                                    str_order_position = f'开{abs(iclots_delta)}手IC多头'
+                                else:
+                                    str_order_position = f'平{abs(iclots_delta)}手IC空头'
+                            elif iclots_delta > 0:  # Sell
+                                if iclots_in_bgt_by_acctidbymxz >= 0:
+                                    str_order_position = f'平{abs(iclots_delta)}手IC多头'
+                                else:
+                                    str_order_position = f'开{abs(iclots_delta)}手IC空头'
+                            else:
+                                str_order_position = ''
+                        else:
+                            if iclots_delta < 0:  # Buy
+                                str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                                      f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
+                            elif iclots_delta > 0:  # Sell
+                                str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                                      f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
+                            else:
+                                str_order_position = ''
+                else:
+                    if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                        if iclots_delta < 0:  # Buy
+                            if iclots_in_bgt_by_acctidbymxz > 0:
+                                str_order_position = f'开{abs(iclots_delta)}手IC多头'
+                            else:
+                                str_order_position = f'平{abs(iclots_delta)}手IC空头'
+                        elif iclots_delta > 0:  # Sell
+                            if iclots_in_bgt_by_acctidbymxz >= 0:
+                                str_order_position = f'平{abs(iclots_delta)}手IC多头'
+                            else:
+                                str_order_position = f'开{abs(iclots_delta)}手IC空头'
+                        else:
+                            str_order_position = ''
+                    else:
+                        if iclots_delta < 0:  # Buy
+                            str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                                  f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
+                        elif iclots_delta > 0:  # Sell
+                            str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                                  f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
+                        else:
+                            str_order_position = ''
+                if str_order_position:
+                    list_str_orders_position_faccts_bracket_part.append(str_order_position)
+            elif accttype in ['o']:
+                continue
+            else:
+                raise ValueError('Unknown accttype.')
+
+        if list_str_orders_position_saccts:
+            str_orders_position_saccts = '，\n'.join(list_str_orders_position_saccts)
+        else:
+            str_orders_position_saccts = ''
+
+        if list_str_orders_position_faccts_bracket_part:
+            str_orders_position_faccts_bracket_part = f"（{'，'.join(list_str_orders_position_faccts_bracket_part)}）"
+        else:
+            str_orders_position_faccts_bracket_part = ''
+
+        if str_orders_position_faccts_bracket_part:
+            str_orders_position_faccts_sum_part = list_str_orders_position_faccts_sum_part[0].replace('equal-', '')
+        else:
+            if 'equal-' in list_str_orders_position_faccts_sum_part[0]:
+                str_orders_position_faccts_sum_part = ''
+            else:
+                raise ValueError('Logic Exception')
+
+        str_orders_position_faccts = str_orders_position_faccts_sum_part + str_orders_position_faccts_bracket_part
+        if str_orders_position_faccts:
+            str_orders_position = f'{str_orders_position_saccts}，{str_orders_position_faccts}'
+        else:
+            str_orders_position = str_orders_position_saccts
 
         signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
-
-        str_orders_position = '\n'.join(list_str_orders_position)
-
         list_dicts_dwitems = list(
             self.gv.db_trddata['manually_patchdata_dwitems'].find(
                 {'DataDate': self.str_today, 'PrdCode': self.prdcode}
@@ -1921,6 +2092,9 @@ class Product:
             '备注': '',
         }
         self.gv.list_dicts_trdplan_output.append(dict_trdplan_orders2gv)
+        self.gv.col_trdplan_output.delete_many({'DataDate': self.str_today, 'PrdCode': self.prdcode})
+        if dict_trdplan_orders2gv:
+            self.gv.col_trdplan_output.insert_one(dict_trdplan_orders2gv)
 
 
 class Account(Product):
