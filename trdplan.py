@@ -1784,7 +1784,7 @@ class Product:
 
                             dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
                                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-                            )
+                            )['holding_aggr_by_secid_first_part']
 
                             if 'IC' in dict_holding_aggr_by_acctidbymxz:
                                 iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
@@ -1863,7 +1863,7 @@ class Product:
 
                         dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
                             {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-                        )
+                        )['holding_aggr_by_secid_first_part']
 
                         if 'IC' in dict_holding_aggr_by_acctidbymxz:
                             iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
@@ -1938,10 +1938,12 @@ class Product:
                     dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
                     acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
 
-                    dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                    dict_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
                         {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
                     )
-
+                    dict_holding_aggr_by_acctidbymxz = (
+                        dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
+                    )
                     if 'IC' in dict_holding_aggr_by_acctidbymxz:
                         iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
                     else:
