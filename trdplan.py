@@ -91,6 +91,10 @@ todo:
         2. 源数据中提供了利息的应还与未还数据，故可以改进算法，精准计算。
         3. 目前的na=总资产-负债，负债中未计算利息的产品，na会被高估
     5. AcctType 中的c,m,f,o 统一改为大写
+    6. 交易计划表述，按照专门的表来处理
+    7. 期货户检查是否有对，影响保证金
+
+
 Memo:
     1. 1203 的个券融券开仓时间为20200623
     3.
@@ -190,6 +194,7 @@ class GlobalVariable:
         self.col_facct_holding_aggr_by_acctidbymxz = self.db_trddata['facct_holding_aggr_by_acctidbymxz']
         self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
         self.col_trdplan_output = self.db_trddata['trdplan_output']
+        self.col_trdplan_expression = self.db_basicinfo['trdplan_expression']
         # todo 以下代码需要改进
         self.dict_broker_abbr2broker_alias = {}
         for dict_broker_info in self.list_dicts_broker_info:
@@ -213,7 +218,7 @@ class Product:
         self.dict_prdinfo = self.gv.col_prdinfo.find_one({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         self.prdname = self.dict_prdinfo['PrdName']
         self.signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
-        self.str_cpsttrdstarttime = self.dict_prdinfo['CptTrdStartTime']
+        self.str_cpsttrdstarttime = self.dict_prdinfo['CpsTrdStartTimes']
         self.dict_strategies_allocation = self.dict_prdinfo['StrategiesAllocation']
         self.dict_na_allocation = self.gv.col_na_allocation.find_one({'PrdCode': prdcode, 'DataDate': self.str_today})
         self.tgt_cpspct = self.dict_prdinfo['TargetCompositePercentage']
@@ -306,39 +311,6 @@ class Product:
         else:
             raise ValueError('Unknown strategy when cmp f lots.')
         return int_lots
-
-    def update_col_na_allocation(self):
-        """
-        1. 从col_na_allocation数据库读取上一交易日na_allocation数据，
-        2. 从SP&R数据表中读取今日生效的申赎数据， 从b/s_by_prdcode中读取产品净值数据
-        3. 计算
-        4. 若prdinfo中指定na_allocation比例，则使用prdinfo中的当前值
-        4. 更新col_na_allocation今日的数据。
-
-        col structure:
-        fields = ['DataDate', 'PrdCode', 'NetAssetAllocationOfSecurityAccounts', 'NetAssetAllocationOfFutureAccounts']
-        dict_na_allocation_saccts = {}
-        dict_na_allocation_faccts = {}
-
-        Note:
-            1. Future Accounts 的分配比例不随申赎款的变化而变化， 故facct的比例只可以手动更改
-
-        业务约定：
-            1. 申购款，申购生效后款项到账后改变比例
-            2. 赎回款，赎回生效日当天改变比例
-        todo 移到db_trading_data.py中
-        """
-
-        dict_na_allocation_yesterday = self.gv.col_na_allocation.find_one(
-            {'DataDate': self.gv.str_yesterday, 'PrdCode': self.prdcode}
-        )
-        dict_na_allocation_saccts_yesterday = dict_na_allocation_yesterday['NetAssetAllocationOfSecurityAccounts']
-        dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one(
-            {'DataDate': self.str_today, 'PrdCode': self.prdcode}
-        )
-        approximate_na = dict_bs_by_prdcode['ApproximateNetAsset']
-        # todo 对该表的通知时间字段建立降序索引，取最新值。
-        dict_spr = self.gv.col_spr.find_one({'EffectiveDate': self.str_today, 'PrdCode': self.prdcode})
 
     def allocate_faccts(self, iclots_total):
         index_future = self.gv.index_future
@@ -566,7 +538,6 @@ class Product:
             if dict_na_allocation_saccts:
                 list_keys_na_allocation_saccts = list(dict_na_allocation_saccts.keys())
                 list_keys_na_allocation_saccts.sort()
-                print(f'顺序为： {list_keys_na_allocation_saccts}')
                 src1 = list_keys_na_allocation_saccts[0]
                 src2 = list_keys_na_allocation_saccts[1]
                 list_values_na_allocation_saccts = [dict_na_allocation_saccts[x]
@@ -1763,30 +1734,321 @@ class Product:
         list_str_orders_capital_inflow.sort()
         list_str_orders_capital = list_str_orders_capital_outflow + list_str_orders_capital_inflow
         str_orders_capital = '\n'.join(list_str_orders_capital)
+        # 今交易组合计划开始
 
         # 今组合交易计划 - 对下午交易的产品调整敞口
         # 逻辑：在下午有交易开始时间的产品，在开盘时使用期指调整敞口，并对交易端进行监控
-        cpstrd_starttime = self.dict_prdinfo['CpsTrdStartTime']
+
+        # 在内存建立数据表类型条目，记录调整敞口后的各期货账户holding
+        list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = []
+        str_order_exposure_adjustment = ''
+        cpstrd_starttime = self.dict_prdinfo['CpsTrdStartTimes']
         list_cpstrd_starttime = cpstrd_starttime.split(',')
         exposure_check_mark = 0
         for cpstrd_starttime in list_cpstrd_starttime:
             if cpstrd_starttime >= '113000':
-                exposure_adjust_mark = 1
+                exposure_check_mark = 1
         if exposure_check_mark:
             net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
-            iclots_rounded2adjust_exposure = round(net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot)
+            iclots_rounded2adjust_exposure_by_prdcode = round(
+                net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
+            )
             # todo 需要检查期货户资金是否充足
-            # todo ??
-            if iclots_rounded2adjust_exposure:
-                pass
+            if iclots_rounded2adjust_exposure_by_prdcode:
+                if self.dict_na_allocation:
+                    if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
+                        for key, value in self.dict_na_allocation.items():
+                            dict_trdplan_expression = self.gv.col_trdplan_expression.find_one(
+                                {'DataDate': self.str_today, 'CapitalSrc': key}
+                            )
+                            str_trdplan_expression = dict_trdplan_expression['TrdPlanExpression']
+                            iclots_rounded2adjust_exposure_after_allocation = round(
+                                iclots_rounded2adjust_exposure_by_prdcode * value
+                            )
+                            list_dicts_acctinfo_facct = self.gv.col_acctinfo.find(
+                                {
+                                    'DataDate': self.str_today,
+                                    'PrdCode': self.prdcode,
+                                    'AcctType': 'f',
+                                    'CapitalSource': key,
+                                    'AcctStatus': 'T',
+                                    'RptMark': 1
+                                }
+                            )
+                            i_accts_f_t = len(list_dicts_acctinfo_facct)
+                            if i_accts_f_t != 1:
+                                raise ValueError('Wrong facct number, please check col_acctinfo.')
 
-        # 今组合交易计划 - 目标持仓及期指
-        # todo 期指开平仓 delta 计算 及表述
+                            dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
+                            acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
 
+                            dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                            )
+
+                            if 'IC' in dict_holding_aggr_by_acctidbymxz:
+                                iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
+                            else:
+                                iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+
+                            iclots_after_exposure_adjustment = (
+                                    iclots_in_facct_holding_aggr_by_acctidbymxz
+                                    - iclots_rounded2adjust_exposure_after_allocation
+                            )
+                            dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                                'DataDate': self.str_today,
+                                'AcctIDByMXZ': acctidbymxz,
+                                'PrdCode': self.prdcode,
+                                'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                            }
+                            list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                                dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                            )
+
+                            if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
+                                if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
+                                    if iclots_after_exposure_adjustment > 0:
+                                        str_order_exposure_adjustment = (
+                                            f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC多头'
+                                        )
+                                    else:
+                                        str_order_exposure_adjustment = (
+                                            f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC空头'
+                                        )
+                                elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
+                                    if iclots_after_exposure_adjustment >= 0:
+                                        str_order_exposure_adjustment = (
+                                            f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC多头'
+                                        )
+                                    else:
+                                        str_order_exposure_adjustment = (
+                                            f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC空头'
+                                        )
+                                else:
+                                    str_order_exposure_adjustment = ''
+                            else:
+                                if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
+                                    str_order_exposure_adjustment = (
+                                        f'{str_trdplan_expression}'
+                                        f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                        f'开{abs(iclots_after_exposure_adjustment)}手IC多头')
+                                elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
+                                    str_order_exposure_adjustment = (
+                                        f'{str_trdplan_expression}'
+                                        f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                        f'开{abs(iclots_after_exposure_adjustment)}手IC空头')
+                                else:
+                                    str_order_exposure_adjustment = ''
+                            str_order_exposure_adjustment += str_order_exposure_adjustment
+
+                    else:
+                        list_dicts_acctinfo_facct = list(
+                            self.gv.col_acctinfo.find(
+                                {
+                                    'DataDate': self.str_today,
+                                    'PrdCode': self.prdcode,
+                                    'AcctType': 'f',
+                                    'AcctStatus': 'T',
+                                    'RptMark': 1
+                                }
+                            )
+                        )
+                        i_accts_f_t = len(list_dicts_acctinfo_facct)
+                        if i_accts_f_t != 1:
+                            raise ValueError('Wrong facct number, please check col_acctinfo.')
+
+                        # todo 重要假设：期货空头只使用IC
+                        dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
+                        acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
+
+                        dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                            {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                        )
+
+                        if 'IC' in dict_holding_aggr_by_acctidbymxz:
+                            iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
+                        else:
+                            iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+
+                        iclots_after_exposure_adjustment = (
+                                iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_rounded2adjust_exposure_by_prdcode
+                        )
+
+                        dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                            'DataDate': self.str_today,
+                            'AcctIDByMXZ': acctidbymxz,
+                            'PrdCode': self.prdcode,
+                            'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                        }
+                        list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                            dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                        )
+
+                        if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
+                            if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                                if iclots_after_exposure_adjustment > 0:
+                                    str_order_exposure_adjustment = (
+                                        f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                    )
+                                else:
+                                    str_order_exposure_adjustment = (
+                                        f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                    )
+                            elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                                if iclots_after_exposure_adjustment >= 0:
+                                    str_order_exposure_adjustment = (
+                                        f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                    )
+                                else:
+                                    str_order_exposure_adjustment = (
+                                        f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                    )
+                            else:
+                                str_order_exposure_adjustment = ''
+                        else:
+                            if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                                str_order_exposure_adjustment = (
+                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                    f'开{abs(iclots_after_exposure_adjustment)}手IC多头'
+                                )
+                            elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                                str_order_exposure_adjustment = (
+                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                    f'开{abs(iclots_after_exposure_adjustment)}手IC空头'
+                                )
+                            else:
+                                str_order_exposure_adjustment = ''
+                else:
+                    list_dicts_acctinfo_facct = list(
+                        self.gv.col_acctinfo.find(
+                            {
+                                'DataDate': self.str_today, 
+                                'PrdCode': self.prdcode,
+                                'AcctType': 'f',
+                                'AcctStatus': 'T',
+                                'RptMark': 1
+                            }
+                        )
+                    )
+                    i_accts_f_t = len(list_dicts_acctinfo_facct)
+                    if i_accts_f_t != 1:
+                        raise ValueError('Wrong facct number, please check col_acctinfo.')
+
+                    # todo 重要假设：期货空头只使用IC
+                    dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
+                    acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
+
+                    dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                    )
+
+                    if 'IC' in dict_holding_aggr_by_acctidbymxz:
+                        iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
+                    else:
+                        iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+
+                    iclots_after_exposure_adjustment = (
+                            iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_rounded2adjust_exposure_by_prdcode
+                    )
+
+                    dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                        'DataDate': self.str_today,
+                        'AcctIDByMXZ': acctidbymxz,
+                        'PrdCode': self.prdcode,
+                        'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                    }
+                    list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                        dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                    )
+
+                    if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
+                        if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                            if iclots_after_exposure_adjustment > 0:
+                                str_order_exposure_adjustment = (
+                                    f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                )
+                            else:
+                                str_order_exposure_adjustment = (
+                                    f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                )
+                        elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                            if iclots_after_exposure_adjustment >= 0:
+                                str_order_exposure_adjustment = (
+                                    f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                )
+                            else:
+                                str_order_exposure_adjustment = (
+                                    f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                )
+                        else:
+                            str_order_exposure_adjustment = ''
+                    else:
+                        if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                            str_order_exposure_adjustment = (
+                                f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                f'开{abs(iclots_after_exposure_adjustment)}手IC多头'
+                            )
+                        elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                            str_order_exposure_adjustment = (
+                                f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                f'开{abs(iclots_after_exposure_adjustment)}手IC空头'
+                            )
+                        else:
+                            str_order_exposure_adjustment = ''
+            else:  # 若无敞口调整事项，则list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz不变
+                list_dicts_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find(
+                    {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+                )
+                for dict_facct_holding_aggr_by_acctidbymxz in list_dicts_facct_holding_aggr_by_acctidbymxz:
+                    acctidbymxz = dict_facct_holding_aggr_by_acctidbymxz['AcctIDByMXZ']
+                    datadate = dict_facct_holding_aggr_by_acctidbymxz['DataDate']
+                    prdcode = dict_facct_holding_aggr_by_acctidbymxz['PrdCode']
+                    dict_holding_aggr_by_secid_first_part = (
+                        dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
+                    )
+                    if 'IC' in dict_holding_aggr_by_secid_first_part:
+                        iclots_after_exposure_adjustment = dict_holding_aggr_by_secid_first_part['IC']
+                    else:
+                        iclots_after_exposure_adjustment = 0
+                    dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                        'DataDate': datadate,
+                        'AcctIDByMXZ': acctidbymxz,
+                        'PrdCode': prdcode,
+                        'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                    }
+                    list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                        dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                    )
+        else:
+            list_dicts_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find(
+                {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+            )
+            for dict_facct_holding_aggr_by_acctidbymxz in list_dicts_facct_holding_aggr_by_acctidbymxz:
+                acctidbymxz = dict_facct_holding_aggr_by_acctidbymxz['AcctIDByMXZ']
+                datadate = dict_facct_holding_aggr_by_acctidbymxz['DataDate']
+                prdcode = dict_facct_holding_aggr_by_acctidbymxz['PrdCode']
+                dict_holding_aggr_by_secid_first_part = (
+                    dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
+                )
+                if 'IC' in dict_holding_aggr_by_secid_first_part:
+                    iclots_after_exposure_adjustment = dict_holding_aggr_by_secid_first_part['IC']
+                else:
+                    iclots_after_exposure_adjustment = 0
+                dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                    'DataDate': datadate,
+                    'AcctIDByMXZ': acctidbymxz,
+                    'PrdCode': prdcode,
+                    'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                }
+                list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                    dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                )
+
+        # 今组合交易计划 - 货基、目标持仓、期指
         list_str_orders_position_saccts = []
         list_str_orders_position_faccts_sum_part = []
         list_str_orders_position_faccts_bracket_part = []
-
+        str_warning_from_exposure_adjustment = ''
         for dict_bgt_by_acctidbymxz in list_dicts_bgt_by_acctidbymxz:
             acctidbymxz = dict_bgt_by_acctidbymxz['AcctIDByMXZ']
             prdcode = acctidbymxz.split('_')[0]
@@ -1806,48 +2068,72 @@ class Product:
                 )
                 broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
                 tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
+                ce_from_cash_available_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['CEFromCashAvailable']
+                ce_from_cash_from_ss_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['CEFromCashFromSS']
+                if ce_from_cash_from_ss_in_bgt_by_acctidbymxz is None:
+                    ce_from_cash_from_ss_in_bgt_by_acctidbymxz = 0
+
+                ce_in_bgt_by_acctidbymxz = (
+                        ce_from_cash_available_in_bgt_by_acctidbymxz + ce_from_cash_from_ss_in_bgt_by_acctidbymxz
+                )
+                ce_in_bs = self.gv.col_bs_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )['CashEquivalent']
+                ce_delta = ce_in_bgt_by_acctidbymxz - ce_in_bs
+                if ce_delta < -3000000:
+                    str_order_ce = f'买货基{round(abs(ce_delta) / 500000) * 50}万，'
+                elif ce_delta > 500000:
+                    str_order_ce = f'卖货基{round(ce_delta / 500000) * 50}万，'
+                else:
+                    str_order_ce = ''
+
+                # 假设每天都重新计算目标持仓
                 if self.dict_na_allocation:
                     if self.dict_na_allocation['SecurityAccountsNetAssetAllocation']:
                         if dict_acctinfo_for_m_mark:
                             if dict_acctinfo_for_t_mark:
                                 if accttype == 'c':
-                                    str_order_position = (f'{broker_alias_in_trdplan}'
-                                                          f'普通户目标持仓{round(tgtpst/500000)*50}万')
+                                    str_order_position = (
+                                        f'{broker_alias_in_trdplan}普通户{str_order_ce}目标持仓{round(tgtpst/500000)*50}万'
+                                    )
                                 elif accttype == 'm':
-                                    str_order_position = (f'{broker_alias_in_trdplan}'
-                                                          f'信用户目标持仓{round(tgtpst/500000)*50}万')
+                                    str_order_position = (
+                                        f'{broker_alias_in_trdplan}信用户{str_order_ce}目标持仓{round(tgtpst/500000)*50}万'
+                                    )
                                 else:
                                     raise ValueError('Unknown accttype')
                             else:
                                 str_order_position = ''
                         else:
-                            str_order_position = f'{broker_alias_in_trdplan}目标持仓{round(tgtpst/500000)*50}万'
+                            str_order_position = (
+                                f'{broker_alias_in_trdplan}{str_order_ce}目标持仓{round(tgtpst/500000)*50}万'
+                            )
                     else:
                         if dict_acctinfo_for_m_mark:
                             if dict_acctinfo_for_t_mark:
                                 if accttype == 'c':
-                                    str_order_position = f'普通户目标持仓{round(tgtpst / 500000) * 50}万'
+                                    str_order_position = f'普通户{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                                 elif accttype == 'm':
-                                    str_order_position = f'信用户目标持仓{round(tgtpst / 500000) * 50}万'
+                                    str_order_position = f'信用户{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                                 else:
                                     raise ValueError('Unknown accttype')
                             else:
                                 str_order_position = ''
                         else:
-                            str_order_position = f'目标持仓{round(tgtpst / 500000) * 50}万'
+                            str_order_position = f'{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                 else:
                     if dict_acctinfo_for_m_mark:
                         if dict_acctinfo_for_t_mark:
                             if accttype == 'c':
-                                str_order_position = f'普通户目标持仓{round(tgtpst / 500000) * 50}万'
+                                str_order_position = f'普通户{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                             elif accttype == 'm':
-                                str_order_position = f'信用户目标持仓{round(tgtpst / 500000) * 50}万'
+                                str_order_position = f'信用户{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                             else:
                                 raise ValueError('Unknown accttype')
                         else:
                             str_order_position = ''
                     else:
-                        str_order_position = f'目标持仓{round(tgtpst / 500000) * 50}万'
+                        str_order_position = f'{str_order_ce}目标持仓{round(tgtpst / 500000) * 50}万'
                 if str_order_position:
                     list_str_orders_position_saccts.append(str_order_position)
 
@@ -1892,24 +2178,34 @@ class Product:
                     {'DataDate': self.str_today, 'BrokerAbbr': broker_abbr, 'BrokerType': broker_type}
                 )
                 broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
-                dict_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
-                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-                )
-                # todo 重要假设：期货空头只使用IC
-                dict_holding_aggr_by_acctidbymxz = (
-                    dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
-                )
-                if 'IC' in dict_holding_aggr_by_acctidbymxz:
-                    iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
-                else:
-                    iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+                iclots_after_exposure_adjustment = None
+                for dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz in (
+                        list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                ):
+                    if acctidbymxz == dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz['AcctIDByMXZ']:
+                        iclots_after_exposure_adjustment = (
+                            dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                            ['ICLotsAfterExposureAdjustment']
+                        )
+                        # 0.16追保线报警
+                        iclots_warning_margin_from_exposure_adjustment = (
+                                iclots_after_exposure_adjustment
+                                * self.gv.dict_index_future2internal_required_na_per_lot['IC']
+                                * 0.8
+                        )
+                        dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                            {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                        )
+                        approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+                        if iclots_warning_margin_from_exposure_adjustment > approximate_na:
+                            str_warning_from_exposure_adjustment = '（Waring: 调敞口导致期货户触发0.16）'
 
                 iclots_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['ICLots']
-                iclots_delta = iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_in_bgt_by_acctidbymxz
+                iclots_delta = iclots_after_exposure_adjustment - iclots_in_bgt_by_acctidbymxz
 
                 if self.dict_na_allocation:
                     if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
-                        if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                        if iclots_after_exposure_adjustment * iclots_in_bgt_by_acctidbymxz >= 0:
                             if iclots_delta < 0:  # Buy
                                 if iclots_in_bgt_by_acctidbymxz > 0:
                                     str_order_position = f'{broker_alias_in_trdplan}开{abs(iclots_delta)}手IC多头'
@@ -1926,17 +2222,17 @@ class Product:
                             if iclots_delta < 0:  # Buy
                                 str_order_position = (
                                     f'{broker_alias_in_trdplan}'
-                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                    f'平{abs(iclots_after_exposure_adjustment)}手IC空头，'
                                     f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
                             elif iclots_delta > 0:  # Sell
                                 str_order_position = (
                                     f'{broker_alias_in_trdplan}'
-                                    f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                    f'平{abs(iclots_after_exposure_adjustment)}手IC多头，'
                                     f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
                             else:
                                 str_order_position = ''
                     else:
-                        if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                        if iclots_after_exposure_adjustment * iclots_in_bgt_by_acctidbymxz >= 0:
                             if iclots_delta < 0:  # Buy
                                 if iclots_in_bgt_by_acctidbymxz > 0:
                                     str_order_position = f'开{abs(iclots_delta)}手IC多头'
@@ -1951,15 +2247,15 @@ class Product:
                                 str_order_position = ''
                         else:
                             if iclots_delta < 0:  # Buy
-                                str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                                str_order_position = (f'平{abs(iclots_after_exposure_adjustment)}手IC空头，'
                                                       f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
                             elif iclots_delta > 0:  # Sell
-                                str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                                str_order_position = (f'平{abs(iclots_after_exposure_adjustment)}手IC多头，'
                                                       f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
                             else:
                                 str_order_position = ''
                 else:
-                    if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_in_bgt_by_acctidbymxz >= 0:
+                    if iclots_after_exposure_adjustment * iclots_in_bgt_by_acctidbymxz >= 0:
                         if iclots_delta < 0:  # Buy
                             if iclots_in_bgt_by_acctidbymxz > 0:
                                 str_order_position = f'开{abs(iclots_delta)}手IC多头'
@@ -1974,10 +2270,10 @@ class Product:
                             str_order_position = ''
                     else:
                         if iclots_delta < 0:  # Buy
-                            str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                            str_order_position = (f'平{abs(iclots_after_exposure_adjustment)}手IC空头，'
                                                   f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC多头')
                         elif iclots_delta > 0:  # Sell
-                            str_order_position = (f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                            str_order_position = (f'平{abs(iclots_after_exposure_adjustment)}手IC多头，'
                                                   f'开{abs(iclots_in_bgt_by_acctidbymxz)}手IC空头')
                         else:
                             str_order_position = ''
@@ -2012,6 +2308,20 @@ class Product:
         else:
             str_orders_position = str_orders_position_saccts
 
+        if str_order_exposure_adjustment:
+            str_orders_exposure_adjustment_and_position = f"{str_order_exposure_adjustment}，\n{str_orders_position}"
+        else:
+            str_orders_exposure_adjustment_and_position = str_orders_position
+
+        if str_warning_from_exposure_adjustment:
+            str_orders_exposure_adjustment_and_position_and_warning = (
+                f"{str_orders_exposure_adjustment_and_position}\n，{str_warning_from_exposure_adjustment}"
+            )
+        else:
+            str_orders_exposure_adjustment_and_position_and_warning = f"{str_orders_exposure_adjustment_and_position}"
+
+
+
         signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
         list_dicts_dwitems = list(
             self.gv.db_trddata['manually_patchdata_dwitems'].find(
@@ -2033,8 +2343,7 @@ class Product:
             str_confirmation_date = dict_dwitems['UNAVConfirmationDate']
             str_expected_dwdate = dict_dwitems['ExpectedDWDate']
             str_dwitems += (f'{str_dwtype_display}{dwbgt_net_amt}万, 按照{str_confirmation_date}净值 '
-                            f'{str_expected_dwdate}划款.  \n')
-
+                            f'{str_expected_dwdate}划款.\n')
         accrued_performance_compensation_according_to_alpha_mark = self.dict_prdinfo['超额计提']
         if accrued_performance_compensation_according_to_alpha_mark:
             str_apcata_mark = 'y'
@@ -2046,21 +2355,23 @@ class Product:
         )['holding_aggr_by_prdcode']
 
         # 当前期指持仓
-        str_future_index = ''
+        list_str_future_index = []
         for key, value in dict_holding_aggr.items():
             if value > 0:
-                str_future_index_delta = f'{abs(value)}手{key}多头\n'
+                str_future_index_delta = f'{abs(value)}手{key}多头'
             elif value < 0:
-                str_future_index_delta = f'{abs(value)}手{key}空头\n'
+                str_future_index_delta = f'{abs(value)}手{key}空头'
             else:
                 str_future_index_delta = ''
-            str_future_index += str_future_index_delta
+            if str_future_index_delta:
+                list_str_future_index.append(str_future_index_delta)
+        str_future_index = '\n'.join(list_str_future_index)
 
         # 当前股票持仓
         list_dicts_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find(
             {'DataDate': self.str_today, 'PrdCode': self.prdcode}
         )
-        str_cpslongamt = ''
+        list_str_cpslongamt = []
         for dict_bs_by_acctidbymxz in list_dicts_bs_by_acctidbymxz:
             acctidbymxz = dict_bs_by_acctidbymxz['AcctIDByMXZ']
             accttype = acctidbymxz.split('_')[1]
@@ -2070,16 +2381,18 @@ class Product:
                 if cpslongamt_rounded == 0:
                     continue
                 str_cpslongamt_delta = (f'{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}'
-                                        f'普通户{cpslongamt_rounded}万\n')
+                                        f'普通户{cpslongamt_rounded}万')
             elif accttype == 'm':
                 cpslongamt_rounded = round(dict_bs_by_acctidbymxz['CompositeLongAmt'] / 500000) * 50
                 if cpslongamt_rounded == 0:
                     continue
                 str_cpslongamt_delta = (f'{self.gv.dict_broker_abbr2broker_alias[broker_abbr]}'
-                                        f'信用户{cpslongamt_rounded}万\n')
+                                        f'信用户{cpslongamt_rounded}万')
             else:
                 str_cpslongamt_delta = ''
-            str_cpslongamt += str_cpslongamt_delta
+            if str_cpslongamt_delta:
+                list_str_cpslongamt.append(str_cpslongamt_delta)
+        str_cpslongamt = '\n'.join(list_str_cpslongamt)
 
         dict_trdplan_orders2gv = {
             '产品代码': self.prdcode,
@@ -2092,19 +2405,42 @@ class Product:
             '今资金划转计划': str_orders_capital,
             '今资金划转执行': '',
             '明资金划转计划': '',
-            '今组合交易计划': str_orders_position,
+            '今组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
             '今组合交易执行': '',
             '明组合交易计划': str_dwitems,
             '注意事项': '',
-            '超额计提': str_apcata_mark,
+            '超额\n计提': str_apcata_mark,
             '当前股票持仓': str_cpslongamt,
             '当前期指持仓': str_future_index,
             '备注': '',
         }
         self.gv.list_dicts_trdplan_output.append(dict_trdplan_orders2gv)
+
+        dict_trdplan_orders2mongodb = {
+            'DataDate': self.str_today,
+            '产品代码': self.prdcode,
+            '证券自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
+            '期货自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
+            '产品名称': self.prdname,
+            '总规模': f'{round(self.prd_approximate_na / 10000)}',
+            '最新净值': f'{round(self.latest_rptunav, 4)}',
+            '信号': signals_on_trdplan,
+            '今资金划转计划': str_orders_capital,
+            '今资金划转执行': '',
+            '明资金划转计划': '',
+            '今组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
+            '今组合交易执行': '',
+            '明组合交易计划': str_dwitems,
+            '注意事项': '',
+            '超额\n计提': str_apcata_mark,
+            '当前股票持仓': str_cpslongamt,
+            '当前期指持仓': str_future_index,
+            '备注': '',
+        }
+
         self.gv.col_trdplan_output.delete_many({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         if dict_trdplan_orders2gv:
-            self.gv.col_trdplan_output.insert_one(dict_trdplan_orders2gv)
+            self.gv.col_trdplan_output.insert_one(dict_trdplan_orders2mongodb)
 
 
 class Account(Product):
@@ -2230,6 +2566,8 @@ class MainFrameWork:
         self.list_prdcodes = self.gv.list_prdcodes
 
     def generate_excel(self):
+        # list_dicts_trdplan_output = list(self.gv.col_trdplan_output.find({'DataDate': self.gv.str_today}, {'_id': 0}))
+        # df_trdplan = pd.DataFrame(list_dicts_trdplan_output).T.reset_index().T
         df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
         fn_trdplan = f'data/trdplan_auto/交易计划mxz-{self.gv.str_next_trddate}.xlsx'
         with pd.ExcelWriter(fn_trdplan) as writer:
@@ -2283,6 +2621,11 @@ class MainFrameWork:
             worksheet_trdplan.set_column('G:G', 12, fmt1)
             worksheet_trdplan.set_column('H:J', 28.25, fmt2)
             worksheet_trdplan.set_column('K:M', 46.63, fmt1)
+            worksheet_trdplan.set_column('N:N', 20.88, fmt2)
+            worksheet_trdplan.set_column('O:O', 5, fmt1)
+            worksheet_trdplan.set_column('P:P', 22.13, fmt2)
+            worksheet_trdplan.set_column('Q:Q', 12.38, fmt2)
+            worksheet_trdplan.set_column('R:R', 35.88, fmt2)
             worksheet_trdplan.set_column('A:A', 8.38, fmt_first_col)
             worksheet_trdplan.set_row(0, 31.5, fmt_header)
             worksheet_trdplan.autofilter(0, 0, 0, 17)
@@ -2297,6 +2640,7 @@ class MainFrameWork:
             prd.output_trdplan_order()
             prd.check_exception()
             prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

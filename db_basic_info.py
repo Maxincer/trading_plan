@@ -21,6 +21,7 @@ class DatabaseBasicInfo:
         self.col_acctinfo.create_index([('DataDate', pymongo.DESCENDING), ('AcctIDByMXZ', pymongo.ASCENDING)])
         self.col_prdinfo = db_basicinfo['prdinfo']
         self.col_broker_info = db_basicinfo['broker_info']
+        self.col_trdplan_expression = db_basicinfo['trdplan_expression']
 
     def update_acctinfo(self):
         """
@@ -66,7 +67,7 @@ class DatabaseBasicInfo:
                                        'PrdCode': str,
                                        'PrdName': str,
                                        'SignalsOnTrdPlan': str,
-                                       'CpsTrdStartTime': str,
+                                       'CpsTrdStartTimes': str,
                                        'PrdCodeIn4121FinalNew': str,
                                        'StrategiesAllocation': str,
                                        'NetAssetAllocation': str,
@@ -179,10 +180,28 @@ class DatabaseBasicInfo:
         self.col_broker_info.insert_many(list_dicts_to_be_inserted)
         print('Collection "broker_info" has been updated.')
 
+    def update_trdplan_expression(self):
+        df_trdplan_expression = pd.read_excel(
+            self.fpath_basicinfo,
+            sheet_name='trdplan_expression',
+            dtype={
+                'CapitalSrc': str,
+                'TrdPlanExpression': str,
+            }
+        )
+        df_trdplan_expression = df_trdplan_expression.where(df_trdplan_expression.notnull(), None)
+        list_dicts_to_be_inserted = df_trdplan_expression.to_dict('records')
+        for dict_to_be_inserted in list_dicts_to_be_inserted:
+            dict_to_be_inserted['DataDate'] = self.str_today
+        self.col_trdplan_expression.delete_many({'DataDate': self.str_today})
+        self.col_trdplan_expression.insert_many(list_dicts_to_be_inserted)
+        print('Collection "trdplan_expression" has been updated.')
+
     def run(self):
         self.update_acctinfo()
         self.update_prdinfo()
         self.update_broker_info()
+        self.update_trdplan_expression()
 
 
 if __name__ == '__main__':
