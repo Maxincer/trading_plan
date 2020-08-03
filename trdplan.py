@@ -1444,7 +1444,7 @@ class Product:
         ce_from_cash_available_src1 = ei_ce_from_cash_available_src1 + mn_ce_from_cash_available_src1
 
         # 资金分配(cacct 与 macct)
-        # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
+        # 原则上，信用户如有负债则在信用户中留足够且仅够开满仓的净资产，但事实上一半无法保证实时达到。
         acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
             {'PrdCode': self.prdcode, 'AcctType': 'c', 'DataDate': self.str_today, 'RptMark': 1}
         )['AcctIDByMXZ']
@@ -1466,7 +1466,13 @@ class Product:
 
         # todo 如有信用户，则”应该“该渠道按照最少净资产原则放在信用户里交易（还未做成）
         dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
+            {
+                'PrdCode': self.prdcode,
+                'AcctType': 'm',
+                'RptMark': 1,
+                'SpecialAccountMark': 0,
+                'DataDate': self.gv.str_today
+            }
         )
         if dict_macct_basicinfo:
             cpslongamt_in_macct_src1 = cpslongamt_src1
@@ -1545,6 +1551,13 @@ class Product:
             acctidbymxz = dict_bgt_by_acctidbymxz['AcctIDByMXZ']
             if acctidbymxz.split('_')[1] == 'faccts':
                 continue
+
+            special_acct_mark = self.gv.col_acctinfo.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+            )['SpecialAccountMark']
+            if special_acct_mark:
+                continue
+
             nav_bgt = dict_bgt_by_acctidbymxz['NAV']
             dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
@@ -2069,6 +2082,12 @@ class Product:
                     {'DataDate': self.str_today, 'BrokerAbbr': broker_abbr, 'BrokerType': broker_type}
                 )
                 broker_alias_in_trdplan = dict_broker_info['BrokerAliasInTrdPlan']
+                # 特殊账户不做处理
+                special_acct_mark = self.gv.col_acctinfo.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )['SpecialAccountMark']
+                if special_acct_mark:
+                    continue
                 tgtpst = dict_bgt_by_acctidbymxz['CPSLongAmt']
                 ce_from_cash_available_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['CEFromCashAvailable']
                 ce_from_cash_from_ss_in_bgt_by_acctidbymxz = dict_bgt_by_acctidbymxz['CEFromCashFromSS']
@@ -2081,7 +2100,7 @@ class Product:
                 ce_in_bs = self.gv.col_bs_by_acctidbymxz.find_one(
                     {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
                 )['CashEquivalent']
-                ce_delta = ce_in_bgt_by_acctidbymxz - ce_in_bs
+                ce_delta = ce_in_bs - ce_in_bgt_by_acctidbymxz
                 if ce_delta < -3000000:
                     str_order_ce = f'买货基{round(abs(ce_delta) / 500000) * 50}万，'
                 elif ce_delta > 500000:
@@ -2568,8 +2587,6 @@ class MainFrameWork:
         self.list_prdcodes = self.gv.list_prdcodes
 
     def generate_excel(self):
-        # list_dicts_trdplan_output = list(self.gv.col_trdplan_output.find({'DataDate': self.gv.str_today}, {'_id': 0}))
-        # df_trdplan = pd.DataFrame(list_dicts_trdplan_output).T.reset_index().T
         df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
         fn_trdplan = f'data/trdplan_auto/交易计划mxz-{self.gv.str_next_trddate}.xlsx'
         with pd.ExcelWriter(fn_trdplan) as writer:
