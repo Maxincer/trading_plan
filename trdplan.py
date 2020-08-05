@@ -1873,7 +1873,7 @@ class Product:
         if iclots_rounded2adjust_exposure_by_prdcode:
             if self.dict_na_allocation:
                 if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
-                    for key, value in self.dict_na_allocation.items():
+                    for key, value in self.dict_na_allocation['FutureAccountsNetAssetAllocation'].items():
                         dict_trdplan_expression = self.gv.col_trdplan_expression.find_one(
                             {'DataDate': self.str_today, 'CapitalSrc': key}
                         )
@@ -1881,15 +1881,17 @@ class Product:
                         iclots_rounded2adjust_exposure_after_allocation = round(
                             iclots_rounded2adjust_exposure_by_prdcode * value
                         )
-                        list_dicts_acctinfo_facct = self.gv.col_acctinfo.find(
-                            {
-                                'DataDate': self.str_today,
-                                'PrdCode': self.prdcode,
-                                'AcctType': 'f',
-                                'CapitalSource': key,
-                                'AcctStatus': 'T',
-                                'RptMark': 1
-                            }
+                        list_dicts_acctinfo_facct = list(
+                            self.gv.col_acctinfo.find(
+                                {
+                                    'DataDate': self.str_today,
+                                    'PrdCode': self.prdcode,
+                                    'AcctType': 'f',
+                                    'CapitalSource': key,
+                                    'AcctStatus': 'T',
+                                    'RptMark': 1
+                                }
+                            )
                         )
                         i_accts_f_t = len(list_dicts_acctinfo_facct)
                         if i_accts_f_t != 1:
@@ -2263,11 +2265,11 @@ class Product:
                 else:
                     # todo 商议表述形式
                     if iclots_in_facct_holding_aggr_by_prdcode > 0:
-                        str_order_position = '清仓IC多头'
+                        str_order_position = '清仓期指'
                     elif iclots_in_facct_holding_aggr_by_prdcode < 0:
-                        str_order_position = '清仓IC空头'
+                        str_order_position = '清仓期指'
                     else:
-                        str_order_position = 'equal-清仓IC期指'
+                        str_order_position = 'equal-清仓期指'
                 list_str_orders_position_faccts_sum_part.append(str_order_position)
 
             # 期指括号内部分
@@ -2398,10 +2400,7 @@ class Product:
         if str_orders_position_faccts_bracket_part:
             str_orders_position_faccts_sum_part = list_str_orders_position_faccts_sum_part[0].replace('equal-', '')
         else:
-            if 'equal-' in list_str_orders_position_faccts_sum_part[0]:
-                str_orders_position_faccts_sum_part = ''
-            else:
-                raise ValueError('Logic Exception')
+            str_orders_position_faccts_sum_part = ''
 
         str_orders_position_faccts = str_orders_position_faccts_sum_part + str_orders_position_faccts_bracket_part
         if str_orders_position_faccts:
@@ -2743,15 +2742,14 @@ class MainFrameWork:
             writer.save()
 
     def run(self):
-        # self.list_prdcodes.remove('918')
+        self.list_prdcodes.remove('918')
         for prdcode in self.list_prdcodes:
-            if prdcode in ['913']:
-                prd = Product(self.gv, prdcode)
-                prd.budget()
-                prd.output_trdplan_order()
-                prd.check_exception()
-                prd.check_exposure()
-                print(f'{prdcode} trdplan finished.')
+            prd = Product(self.gv, prdcode)
+            prd.budget()
+            prd.output_trdplan_order()
+            prd.check_exception()
+            prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
