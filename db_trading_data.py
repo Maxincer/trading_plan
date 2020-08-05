@@ -74,7 +74,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200731'
+        # self.str_today = '20200804'
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -698,21 +698,27 @@ class DBTradingData:
                 dwbgt_unav = unav_on_confirmation_date
             else:
                 dwbgt_unav = latest_unav_in_final_new
-
             dwbgt_netamt = dwamt + dwshares * dwbgt_unav
 
-            str_notice_dt = dict_dwitems_read_excel['NoticeDateTime']
-            str_notice_date = str_notice_dt.split('T')[0]
-            str_notice_time = str_notice_dt.split('T')[1]
+            if dwshares < 0:
+                dwbgt_netamt_estimated = dwamt + dwshares * (dwbgt_unav + 0.01)
+            else:
+                dwbgt_netamt_estimated = dwamt + dwshares * dwbgt_unav
 
-            dict_dwitems_read_excel['NoticeDate'] = str_notice_date
-            dict_dwitems_read_excel['NoticeTime'] = str_notice_time
+            # todo 时间设计是否有用？
+            # str_notice_dt = dict_dwitems_read_excel['NoticeDateTime']
+            # str_notice_date = str_notice_dt.split('T')[0]
+            # str_notice_time = str_notice_dt.split('T')[1]
+            #
+            # dict_dwitems_read_excel['NoticeDate'] = str_notice_date
+            # dict_dwitems_read_excel['NoticeTime'] = str_notice_time
             dict_dwitems_read_excel['DataDate'] = self.str_today
             dict_dwitems_read_excel['Shares'] = dwshares
             dict_dwitems_read_excel['UNAVOnConfirmationDate'] = unav_on_confirmation_date
             dict_dwitems_read_excel['UNAVOnLatestRptDate'] = latest_unav_in_final_new
             dict_dwitems_read_excel['DWBGTNetAmt'] = dwbgt_netamt
-            dict_dwitems_read_excel['DWBGTNetAMT2DW'] = dwbgt_netamt - dwed_amt
+            dict_dwitems_read_excel['DWBGTNetAmtEstimated'] = dwbgt_netamt_estimated
+            dict_dwitems_read_excel['DWBGTNetAMTEstimated2DW'] = dwbgt_netamt_estimated - dwed_amt
             status = dict_dwitems_read_excel['Status']
             if status > 0:
                 list_dicts_dwitems_2b_inserted.append(dict_dwitems_read_excel)
@@ -1360,10 +1366,16 @@ class DBTradingData:
                 flt_composite_long_amt = stock_longamt
 
                 # 2.5 SwapAmt
-                flt_swap_amt = swap_longamt
+                # 更新：大于0的进交易性金融资产，为资产端项目；小于0的进交易性金融负债，为负债端项目
+                flt_swap_amt2asset = 0
+                if swap_longamt > 0:
+                    flt_swap_amt2asset = swap_longamt
+                flt_swap_amt2liability = 0
+                if swap_longamt < 0:
+                    flt_swap_amt2liability = abs(swap_longamt)
 
                 # 2.5 Asset
-                flt_ttasset = flt_cash + flt_ce + flt_etf_long_amt + flt_composite_long_amt + flt_swap_amt
+                flt_ttasset = flt_cash + flt_ce + flt_etf_long_amt + flt_composite_long_amt + flt_swap_amt2asset
 
                 # 2.6 etf_shortamt
                 flt_etf_short_amt = etf_shortamt
@@ -1372,10 +1384,12 @@ class DBTradingData:
                 flt_composite_short_amt = stock_shortamt
 
                 # 2.8 liability
-                # liability = 融券负债（利息+本金）+ 融资负债（利息+本金）
+                # liability = 融券负债（利息+本金）+ 融资负债（利息+本金）+ 场外合约形成的负债（交易性金融负债）
                 if flt_capital_debt is None:
                     flt_capital_debt = 0
-                flt_liability = float(df_holding_fmtted_patched['Liability'].sum()) + flt_capital_debt
+                flt_liability = (
+                        float(df_holding_fmtted_patched['Liability'].sum()) + flt_capital_debt + flt_swap_amt2liability
+                )
 
                 # 2.9 net_asset
                 flt_approximate_na = flt_ttasset - flt_liability
@@ -1422,11 +1436,12 @@ class DBTradingData:
                     'CashEquivalent': flt_ce,
                     'ETFLongAmt': flt_etf_long_amt,
                     'CompositeLongAmt': flt_composite_long_amt,
-                    'SwapLongAmt': flt_swap_amt,
+                    'AssetFromSwap': flt_swap_amt2asset,
                     'TotalAsset': flt_ttasset,
                     'CapitalDebt': flt_capital_debt,
                     'ETFShortAmt': flt_etf_short_amt,
                     'CompositeShortAmt': flt_composite_short_amt,
+                    'LiabilityFromSwap': flt_swap_amt2liability,
                     'Liability': flt_liability,
                     'ApproximateNetAsset': flt_approximate_na,
                 }
@@ -1691,10 +1706,10 @@ class DBTradingData:
             )
             amt2dw_by_prdcode = 0
             for dict_manually_patchdata_dwitems in list_dicts_manually_patchdata_dwitems:
-                dwbgt_netamt2dw = dict_manually_patchdata_dwitems['DWBGTNetAMT2DW']
+                dwbgt_netamt_estimated2dw = dict_manually_patchdata_dwitems['DWBGTNetAMTEstimated2DW']
                 status = dict_manually_patchdata_dwitems['Status']
                 if status in [2, 3]:
-                    amt2dw_by_prdcode += dwbgt_netamt2dw
+                    amt2dw_by_prdcode += dwbgt_netamt_estimated2dw
 
             dict_tgt_items = dict_prdinfo['TargetItems']
             designated_na = None

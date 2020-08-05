@@ -128,7 +128,6 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200731'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -195,6 +194,7 @@ class GlobalVariable:
         self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
         self.col_trdplan_output = self.db_trddata['trdplan_output']
         self.col_trdplan_expression = self.db_basicinfo['trdplan_expression']
+        self.dict_prdcode2special_na_src1 = {'707': 5000000}  # 人工T0处理
         # todo 以下代码需要改进
         self.dict_broker_abbr2broker_alias = {}
         for dict_broker_info in self.list_dicts_broker_info:
@@ -450,7 +450,8 @@ class Product:
                     self.list_dicts_bgt_by_acctidbymxz += list_dicts_bgt_faccts
             else:
                 dict_acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
-                    {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T', 'PrdCode': self.prdcode}
+                    {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T',
+                     'PrdCode': self.prdcode, 'RptMark': 1}
                 )
 
                 if dict_acctidbymxz_facct_trading:
@@ -471,7 +472,7 @@ class Product:
                 self.list_dicts_bgt_by_acctidbymxz.append(dict_bgt_facct)
         else:
             dict_acctidbymxz_facct_trading = self.gv.col_acctinfo.find_one(
-                {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T', 'PrdCode': self.prdcode}
+                {'DataDate': self.str_today, 'AcctType': 'f', 'AcctStatus': 'T', 'PrdCode': self.prdcode, 'RptMark': 1}
             )
 
             if dict_acctidbymxz_facct_trading:
@@ -509,7 +510,6 @@ class Product:
         11. oacct 与 macct空头市值仅为mn策略使用
         12. ei策略无融资和融券，产品中存在的融资融券部分均分配给mn策略
 
-
         Note:
             1. 注意现有持仓是两个策略的合并持仓，需要按照比例分配。
             2. 本项目中资金的渠道分配是以营业部为主体，而非券商。（同一券商可能会有多个资金渠道）
@@ -527,7 +527,6 @@ class Product:
 
         todo：
             1. 需要分析两融户中换仓资金的准确算法， 即 保证金制度交易下的详细算法（大课题）。
-
         """
         # 函数级 假设部分
         index_future = self.gv.index_future  # todo 可进一步抽象， 与空头策略有关
@@ -1093,10 +1092,21 @@ class Product:
                     # 资金分配(cacct 与 macct)
                     # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
                     acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
-                        {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[0], 'AcctType': 'c'}
+                        {
+                            'PrdCode': self.prdcode,
+                            'CapitalSource': list_keys_na_allocation_saccts[0],
+                            'AcctType': 'c',
+                            'SpecialAccountMark': 0,
+                        }
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
-                        {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[0], 'AcctType': 'm'}
+                        {
+                            'PrdCode': self.prdcode,
+                            'CapitalSource': list_keys_na_allocation_saccts[0],
+                            'AcctType': 'm',
+                            'SpecialAccountMark': 0,
+                            'AcctStatus': 'T'
+                        }
                     )
                     if dict_acctidbymxz_macct_src1:
                         acctidbymxz_macct_src1 = dict_acctidbymxz_macct_src1['AcctIDByMXZ']
@@ -1104,10 +1114,21 @@ class Product:
                         acctidbymxz_macct_src1 = None
 
                     acctidbymxz_cacct_src2 = self.gv.col_acctinfo.find_one(
-                        {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[1], 'AcctType': 'c'}
+                        {
+                            'PrdCode': self.prdcode,
+                            'CapitalSource': list_keys_na_allocation_saccts[1],
+                            'AcctType': 'c',
+                            'SpecialAccountMark': 0,
+                        }
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src2 = self.gv.col_acctinfo.find_one(
-                        {'PrdCode': self.prdcode, 'CapitalSource': list_keys_na_allocation_saccts[1], 'AcctType': 'm'}
+                        {
+                            'PrdCode': self.prdcode,
+                            'CapitalSource': list_keys_na_allocation_saccts[1],
+                            'AcctType': 'm',
+                            'SpecialAccountMark': 0,
+                            'AcctStatus': 'T'
+                        }
                     )
 
                     if dict_acctidbymxz_macct_src2:
@@ -1131,6 +1152,12 @@ class Product:
                     cash_available_in_macct_src1 = None
                     cash_available_in_macct_src2 = None
                     # todo 此处假设： 若macct中不满仓，则可用于交易的现金对应的货基应全部转至cacct，故macct中ce_from_cash_available为0
+                    # todo 注意，需要分情况讨论： 当担保品充足时，当担保品不足时
+                    # todo 当担保品充足时，macct总资产 = (
+                    #  卖出融券所得资金 + 目标持仓市值 * (1 + self.gv.flt_cash2cpslongamt) + 用于补充担保品的ce
+                    #  )
+                    # todo 当担保品充足时，macct净资产 = macct总资产 - macct负债
+                    # todo 信用户中可用资金的锁定
                     ce_from_cash_available_in_macct_src1 = 0
                     ce_from_cash_available_in_macct_src2 = 0
                     ce_from_cash_from_ss_src1 = mn_ce_from_ss_src1
@@ -1138,16 +1165,42 @@ class Product:
 
                     # 如有信用户，则该渠道按照最少净资产原则放在信用户里交易
                     dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-                        {'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1, 'SpecialAccountMark': 0}
+                        {
+                            'PrdCode': self.prdcode,
+                            'AcctType': 'm',
+                            'RptMark': 1,
+                            'SpecialAccountMark': 0,
+                            'AcctStatus': 'T'
+                        }
                     )
                     if dict_macct_basicinfo:
                         capital_source = dict_macct_basicinfo['CapitalSource']
                         idx_capital_source = list_keys_na_allocation_saccts.index(capital_source)
                         if idx_capital_source == 0:
+                            dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
+                            )
+                            ttasset_macct = dict_bs_by_acctidbymxz['TotalAsset']
+                            liability_macct = dict_bs_by_acctidbymxz['Liability']
+                            if liability_macct:
+                                margin_maintenance_ratio = ttasset_macct / liability_macct
+                            else:
+                                margin_maintenance_ratio = 999999999
+                            if margin_maintenance_ratio <= 1.5:
+                                print(
+                                    f'Warning, margin maintenance ratio {margin_maintenance_ratio}, '
+                                    f'may be not sufficient.'
+                                )
+
                             cpslongamt_in_macct_src1 = cpslongamt_src1
                             cash_available_in_macct_src1 = cpslongamt_src1 * self.gv.flt_cash2cpslongamt
                             na_cacct_src1 = ce_from_cash_available_src1
-                            na_macct_src1 = cpslongamt_in_macct_src1 + cash_available_in_macct_src1
+                            na_macct_src1 = (
+                                    cpslongamt_in_macct_src1
+                                    + cash_available_in_macct_src1
+                                    + ce_from_cash_from_ss_src1
+                                    - liability_macct
+                            )
                             cpslongamt_in_cacct_src1 = 0
                             if na_cacct_src1 > 2500000:
                                 ce_in_cacct_src1 = na_cacct_src1 - 2500000
@@ -1157,10 +1210,31 @@ class Product:
                                 cash_available_in_cacct_src1 = na_cacct_src1
 
                         elif idx_capital_source == 1:
+                            dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src2}
+                            )
+                            ttasset_macct = dict_bs_by_acctidbymxz['TotalAsset']
+                            liability_macct = dict_bs_by_acctidbymxz['Liability']
+                            if liability_macct:
+                                margin_maintenance_ratio = ttasset_macct / liability_macct
+                            else:
+                                margin_maintenance_ratio = 999999999
+                            if margin_maintenance_ratio <= 1.5:
+                                print(
+                                    f'Warning, margin maintenance ratio {margin_maintenance_ratio}, '
+                                    f'may be not sufficient.'
+                                )
+
                             cpslongamt_in_macct_src2 = cpslongamt_src2
                             cash_available_in_macct_src2 = cpslongamt_src2 * self.gv.flt_cash2cpslongamt
                             na_cacct_src2 = ce_from_cash_available_src2
-                            na_macct_src2 = cpslongamt_in_macct_src2 + cash_available_in_macct_src2
+                            na_macct_src2 = (
+                                    cpslongamt_in_macct_src2
+                                    + cash_available_in_macct_src2
+                                    + ce_from_cash_from_ss_src2
+                                    - liability_macct
+                            )
+
                             cpslongamt_in_cacct_src2 = 0
                             if na_cacct_src2 > 2500000:
                                 ce_in_cacct_src2 = na_cacct_src2 - 2500000
@@ -1263,7 +1337,10 @@ class Product:
         ei_na_oaccts_src1 = 0
         ei_capital_debt_src1 = 0
         ei_liability_src1 = 0
+        # todo 可进一步抽象
         ei_special_na_src1 = 0
+        if self.prdcode in self.gv.dict_prdcode2special_na_src1:
+            ei_special_na_src1 = self.gv.dict_prdcode2special_na_src1[self.prdcode]
         ei_cpsshortamt_src1 = 0
         ei_etfshortamt_src1 = 0
         ei_net_exposure_from_oaccts_src1 = 0
@@ -1278,8 +1355,16 @@ class Product:
         na_src1_tgt = self.prdna_tgt
         ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
         mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
+
         dict_macct_basicinfo_src1 = self.gv.col_acctinfo.find_one(
-            {'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'm', 'RptMark': 1}
+            {
+                'DataDate': self.str_today,
+                'PrdCode': self.prdcode,
+                'AcctType': 'm',
+                'RptMark': 1,
+                'AcctStatus': 'T',
+                'SpecialAccountMark': 0
+            }
         )
         mn_cash_from_ss_src1 = 0
         mn_etfshortamt_src1 = 0
@@ -1288,19 +1373,18 @@ class Product:
         mn_security_debt_in_macct_src1 = 0
         if dict_macct_basicinfo_src1:
             acctidbymxz_macct_src1 = dict_macct_basicinfo_src1['AcctIDByMXZ']
-
             dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
             )
             mn_capital_debt_in_macct_src1 = dict_bs_by_acctidbymxz['CapitalDebt']
             mn_security_debt_in_macct_src1 = (dict_bs_by_acctidbymxz['CompositeShortAmt']
                                               + dict_bs_by_acctidbymxz['ETFShortAmt'])
-            list_dicts_formatted_holding = self.gv.col_formatted_holding.find(
+            iter_dicts_formatted_holding = self.gv.col_formatted_holding.find(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
             )
 
             # todo 更新，在b/s中有分拆，不用重新累加， 需要在b/s表中添加卖出融券所得资金, 此处可改进
-            for dict_formatted_holding in list_dicts_formatted_holding:
+            for dict_formatted_holding in iter_dicts_formatted_holding:
                 sectype = dict_formatted_holding['SecurityType']
                 mn_cash_from_ss_delta = dict_formatted_holding['CashFromShortSelling']
                 mn_cash_from_ss_src1 += mn_cash_from_ss_delta
@@ -1329,8 +1413,9 @@ class Product:
             self.gv.col_acctinfo.find({'DataDate': self.str_today, 'PrdCode': self.prdcode, 'AcctType': 'o'})
         )
         mn_net_exposure_from_oaccts_src1 = 0
-        mn_approximate_na_oaccts_src1 = 0
         mn_capital_debt_in_oaccts_src1 = 0
+        mn_ttasset_oacct = 0
+        mn_liability_in_oacct_src1 = 0
         for dict_oacct_basicinfo_src1 in list_dicts_oacct_basicinfo_src1:
             if dict_oacct_basicinfo_src1:
                 acctidbymxz_oacct = dict_oacct_basicinfo_src1['AcctIDByMXZ']
@@ -1342,15 +1427,15 @@ class Product:
                 dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
                     {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_oacct}
                 )
-                approximate_na_oacct_delta = dict_bs_by_acctidbymxz['ApproximateNetAsset']
-                mn_approximate_na_oaccts_src1 += approximate_na_oacct_delta
+                mn_ttasset_oacct_delta = dict_bs_by_acctidbymxz['TotalAsset']
+                mn_ttasset_oacct += mn_ttasset_oacct_delta
+                mn_liability_oacct_delta = dict_bs_by_acctidbymxz['Liability']
+                mn_liability_in_oacct_src1 += mn_liability_oacct_delta
                 mn_capital_debt_in_oaccts_delta = dict_bs_by_acctidbymxz['CapitalDebt']
                 mn_capital_debt_in_oaccts_src1 += mn_capital_debt_in_oaccts_delta
 
         if self.dict_tgt_items['NetExposureFromOTCAccounts']:
             mn_net_exposure_from_oaccts_src1 = self.dict_tgt_items['NetExposureFromOTCAccounts']
-        if self.dict_tgt_items['NetAssetInOTCAccounts']:
-            mn_approximate_na_oaccts_src1 = self.dict_tgt_items['NetAssetInOTCAccounts']
 
         # 未知量
         ei_cpslongamt_src1 = Symbol('ei_cpslongamt_src1', real=True, nonnegative=True)
@@ -1362,7 +1447,9 @@ class Product:
         list_eqs_2b_solved = []
 
         # 方程-双模式计算补充
-        if self.tgt_cpspct == 'max':
+        # todo max模式补充： 单渠道，双渠道
+        # max_asset 模式： 不考虑oacct，最大化资金利用率，用float 格式 9 表示
+        if self.tgt_cpspct == 9:
             eq_ei_ce_src1 = ei_ce_from_cash_available_src1
             eq_mn_ce_src1 = mn_ce_from_cash_available_src1
             list_eqs_2b_solved.append(eq_ei_ce_src1)
@@ -1373,7 +1460,7 @@ class Product:
             list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
             list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
-        # 核心方程组-净资产
+        # 核心方程组-总资产等式
         eq_ei_na_src1 = (
                 ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                 + ei_ce_from_cash_available_src1
@@ -1395,12 +1482,11 @@ class Product:
                 + mn_etflongamt_src1
                 + mn_special_na_src1
                 + abs(mn_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
-                + mn_approximate_na_oaccts_src1
+                + mn_ttasset_oacct
                 - mn_na_src1_tgt
                 - mn_capital_debt_in_macct_src1
-                - mn_capital_debt_in_oaccts_src1
                 - mn_security_debt_in_macct_src1
-                - mn_security_debt_in_oaccts_src1
+                - mn_liability_in_oacct_src1
         )
         list_eqs_2b_solved.append(eq_mn_na_src1)
 
@@ -1446,14 +1532,26 @@ class Product:
         # 资金分配(cacct 与 macct)
         # 原则上，信用户如有负债则在信用户中留足够且仅够开满仓的净资产，但事实上一半无法保证实时达到。
         acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'c', 'DataDate': self.str_today, 'RptMark': 1}
+            {
+                'PrdCode': self.prdcode,
+                'AcctType': 'c',
+                'DataDate': self.str_today,
+                'RptMark': 1,
+                'SpecialAccountMark': 0
+            }
         )['AcctIDByMXZ']
-        dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
-            {'PrdCode': self.prdcode, 'AcctType': 'm', 'DataDate': self.str_today, 'RptMark': 1}
+        dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
+            {
+                'PrdCode': self.prdcode,
+                'AcctType': 'm',
+                'DataDate': self.str_today,
+                'RptMark': 1,
+                'SpecialAccountMark': 0,
+                'AcctStatus': 'T',
+            }
         )
-
-        if dict_acctidbymxz_macct_src1:
-            acctidbymxz_macct_src1 = dict_acctidbymxz_macct_src1['AcctIDByMXZ']
+        if dict_macct_basicinfo:
+            acctidbymxz_macct_src1 = dict_macct_basicinfo['AcctIDByMXZ']
         else:
             acctidbymxz_macct_src1 = None
 
@@ -1461,24 +1559,36 @@ class Product:
         na_macct_src1 = None
         cash_available_in_macct_src1 = None
         # todo 此处假设： 若macct中不满仓，则可用于交易的现金对应的货基应全部转至cacct，故macct中ce_from_cash_available为0
+        # todo 注意，需要分情况讨论： 当担保品充足时，当担保品不足时
+        # todo 当担保品充足时，macct总资产 = 卖出融券所得资金 + 目标持仓市值 * (1 + self.gv.flt_cash2cpslongamt) + 用于补充担保品的ce
+        # todo 当担保品充足时，macct净资产 = macct总资产 - macct负债
+        # todo 信用户中可用资金的锁定
+
         ce_from_cash_available_in_macct_src1 = 0
         ce_from_cash_from_ss_src1 = mn_ce_from_ss_src1
 
-        # todo 如有信用户，则”应该“该渠道按照最少净资产原则放在信用户里交易（还未做成）
-        dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
-            {
-                'PrdCode': self.prdcode,
-                'AcctType': 'm',
-                'RptMark': 1,
-                'SpecialAccountMark': 0,
-                'DataDate': self.gv.str_today
-            }
-        )
         if dict_macct_basicinfo:
+            dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
+            )
+            ttasset_macct = dict_bs_by_acctidbymxz['TotalAsset']
+            liability_macct = dict_bs_by_acctidbymxz['Liability']
+            if liability_macct:
+                margin_maintenance_ratio = ttasset_macct / liability_macct
+            else:
+                margin_maintenance_ratio = 999999999
+            if margin_maintenance_ratio <= 1.5:
+                print(f'Warning, margin maintenance ratio {margin_maintenance_ratio}, may be not sufficient.')
+
             cpslongamt_in_macct_src1 = cpslongamt_src1
             cash_available_in_macct_src1 = cpslongamt_src1 * self.gv.flt_cash2cpslongamt
             na_cacct_src1 = ce_from_cash_available_src1
-            na_macct_src1 = cpslongamt_in_macct_src1 + cash_available_in_macct_src1
+            na_macct_src1 = (
+                    cpslongamt_in_macct_src1
+                    + cash_available_in_macct_src1
+                    + ce_from_cash_from_ss_src1
+                    - liability_macct
+            )
             cpslongamt_in_cacct_src1 = 0
             if na_cacct_src1 > 2500000:
                 ce_in_cacct_src1 = na_cacct_src1 - 2500000
@@ -1535,8 +1645,8 @@ class Product:
 
     def output_trdplan_order(self):
         """
-        输出该产品的交易计划上的条目数据，存储在gv.list_trplan_output中。
-        输出dict数据。
+        # todo 更改： 查敞口
+
         """
         # 今资金划转计划
         list_dicts_bgt_by_acctidbymxz = list(
@@ -1755,122 +1865,36 @@ class Product:
         # 在内存建立数据表类型条目，记录调整敞口后的各期货账户holding
         list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = []
         str_order_exposure_adjustment = ''
-        cpstrd_starttime = self.dict_prdinfo['CpsTrdStartTimes']
-        list_cpstrd_starttime = cpstrd_starttime.split(',')
-        exposure_check_mark = 0
-        for cpstrd_starttime in list_cpstrd_starttime:
-            if cpstrd_starttime >= '113000':
-                exposure_check_mark = 1
-        if exposure_check_mark:
-            net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
-            iclots_rounded2adjust_exposure_by_prdcode = round(
-                net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
-            )
-            # todo 需要检查期货户资金是否充足
-            if iclots_rounded2adjust_exposure_by_prdcode:
-                if self.dict_na_allocation:
-                    if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
-                        for key, value in self.dict_na_allocation.items():
-                            dict_trdplan_expression = self.gv.col_trdplan_expression.find_one(
-                                {'DataDate': self.str_today, 'CapitalSrc': key}
-                            )
-                            str_trdplan_expression = dict_trdplan_expression['TrdPlanExpression']
-                            iclots_rounded2adjust_exposure_after_allocation = round(
-                                iclots_rounded2adjust_exposure_by_prdcode * value
-                            )
-                            list_dicts_acctinfo_facct = self.gv.col_acctinfo.find(
-                                {
-                                    'DataDate': self.str_today,
-                                    'PrdCode': self.prdcode,
-                                    'AcctType': 'f',
-                                    'CapitalSource': key,
-                                    'AcctStatus': 'T',
-                                    'RptMark': 1
-                                }
-                            )
-                            i_accts_f_t = len(list_dicts_acctinfo_facct)
-                            if i_accts_f_t != 1:
-                                raise ValueError('Wrong facct number, please check col_acctinfo.')
-
-                            dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
-                            acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
-
-                            dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
-                                {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-                            )['holding_aggr_by_secid_first_part']
-
-                            if 'IC' in dict_holding_aggr_by_acctidbymxz:
-                                iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
-                            else:
-                                iclots_in_facct_holding_aggr_by_acctidbymxz = 0
-
-                            iclots_after_exposure_adjustment = (
-                                    iclots_in_facct_holding_aggr_by_acctidbymxz
-                                    - iclots_rounded2adjust_exposure_after_allocation
-                            )
-                            dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+        net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
+        iclots_rounded2adjust_exposure_by_prdcode = round(
+            net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
+        )
+        # 开盘即平掉敞口
+        if iclots_rounded2adjust_exposure_by_prdcode:
+            if self.dict_na_allocation:
+                if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
+                    for key, value in self.dict_na_allocation.items():
+                        dict_trdplan_expression = self.gv.col_trdplan_expression.find_one(
+                            {'DataDate': self.str_today, 'CapitalSrc': key}
+                        )
+                        str_trdplan_expression = dict_trdplan_expression['TrdPlanExpression']
+                        iclots_rounded2adjust_exposure_after_allocation = round(
+                            iclots_rounded2adjust_exposure_by_prdcode * value
+                        )
+                        list_dicts_acctinfo_facct = self.gv.col_acctinfo.find(
+                            {
                                 'DataDate': self.str_today,
-                                'AcctIDByMXZ': acctidbymxz,
                                 'PrdCode': self.prdcode,
-                                'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                                'AcctType': 'f',
+                                'CapitalSource': key,
+                                'AcctStatus': 'T',
+                                'RptMark': 1
                             }
-                            list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
-                                dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
-                            )
-
-                            if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
-                                if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
-                                    if iclots_after_exposure_adjustment > 0:
-                                        str_order_exposure_adjustment = (
-                                            f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC多头'
-                                        )
-                                    else:
-                                        str_order_exposure_adjustment = (
-                                            f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC空头'
-                                        )
-                                elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
-                                    if iclots_after_exposure_adjustment >= 0:
-                                        str_order_exposure_adjustment = (
-                                            f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC多头'
-                                        )
-                                    else:
-                                        str_order_exposure_adjustment = (
-                                            f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC空头'
-                                        )
-                                else:
-                                    str_order_exposure_adjustment = ''
-                            else:
-                                if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}'
-                                        f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
-                                        f'开{abs(iclots_after_exposure_adjustment)}手IC多头')
-                                elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}'
-                                        f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
-                                        f'开{abs(iclots_after_exposure_adjustment)}手IC空头')
-                                else:
-                                    str_order_exposure_adjustment = ''
-                            str_order_exposure_adjustment += str_order_exposure_adjustment
-
-                    else:
-                        list_dicts_acctinfo_facct = list(
-                            self.gv.col_acctinfo.find(
-                                {
-                                    'DataDate': self.str_today,
-                                    'PrdCode': self.prdcode,
-                                    'AcctType': 'f',
-                                    'AcctStatus': 'T',
-                                    'RptMark': 1
-                                }
-                            )
                         )
                         i_accts_f_t = len(list_dicts_acctinfo_facct)
                         if i_accts_f_t != 1:
                             raise ValueError('Wrong facct number, please check col_acctinfo.')
 
-                        # todo 重要假设：期货空头只使用IC
                         dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
                         acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
 
@@ -1884,9 +1908,9 @@ class Product:
                             iclots_in_facct_holding_aggr_by_acctidbymxz = 0
 
                         iclots_after_exposure_adjustment = (
-                                iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_rounded2adjust_exposure_by_prdcode
+                                iclots_in_facct_holding_aggr_by_acctidbymxz
+                                - iclots_rounded2adjust_exposure_after_allocation
                         )
-
                         dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
                             'DataDate': self.str_today,
                             'AcctIDByMXZ': acctidbymxz,
@@ -1898,44 +1922,46 @@ class Product:
                         )
 
                         if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
-                            if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                            if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
                                 if iclots_after_exposure_adjustment > 0:
                                     str_order_exposure_adjustment = (
-                                        f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                        f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC多头'
                                     )
                                 else:
                                     str_order_exposure_adjustment = (
-                                        f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                        f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC空头'
                                     )
-                            elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                            elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
                                 if iclots_after_exposure_adjustment >= 0:
                                     str_order_exposure_adjustment = (
-                                        f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                                        f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC多头'
                                     )
                                 else:
                                     str_order_exposure_adjustment = (
-                                        f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                                        f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC空头'
                                     )
                             else:
                                 str_order_exposure_adjustment = ''
                         else:
-                            if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                            if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
                                 str_order_exposure_adjustment = (
+                                    f'{str_trdplan_expression}'
                                     f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
-                                    f'开{abs(iclots_after_exposure_adjustment)}手IC多头'
-                                )
-                            elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                                    f'开{abs(iclots_after_exposure_adjustment)}手IC多头')
+                            elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
                                 str_order_exposure_adjustment = (
+                                    f'{str_trdplan_expression}'
                                     f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
-                                    f'开{abs(iclots_after_exposure_adjustment)}手IC空头'
-                                )
+                                    f'开{abs(iclots_after_exposure_adjustment)}手IC空头')
                             else:
                                 str_order_exposure_adjustment = ''
+                        str_order_exposure_adjustment += str_order_exposure_adjustment
+
                 else:
                     list_dicts_acctinfo_facct = list(
                         self.gv.col_acctinfo.find(
                             {
-                                'DataDate': self.str_today, 
+                                'DataDate': self.str_today,
                                 'PrdCode': self.prdcode,
                                 'AcctType': 'f',
                                 'AcctStatus': 'T',
@@ -1951,12 +1977,10 @@ class Product:
                     dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
                     acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
 
-                    dict_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                    dict_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
                         {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
-                    )
-                    dict_holding_aggr_by_acctidbymxz = (
-                        dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
-                    )
+                    )['holding_aggr_by_secid_first_part']
+
                     if 'IC' in dict_holding_aggr_by_acctidbymxz:
                         iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
                     else:
@@ -2010,31 +2034,86 @@ class Product:
                             )
                         else:
                             str_order_exposure_adjustment = ''
-            else:  # 若无敞口调整事项，则list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz不变
-                list_dicts_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find(
-                    {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+            else:
+                list_dicts_acctinfo_facct = list(
+                    self.gv.col_acctinfo.find(
+                        {
+                            'DataDate': self.str_today,
+                            'PrdCode': self.prdcode,
+                            'AcctType': 'f',
+                            'AcctStatus': 'T',
+                            'RptMark': 1
+                        }
+                    )
                 )
-                for dict_facct_holding_aggr_by_acctidbymxz in list_dicts_facct_holding_aggr_by_acctidbymxz:
-                    acctidbymxz = dict_facct_holding_aggr_by_acctidbymxz['AcctIDByMXZ']
-                    datadate = dict_facct_holding_aggr_by_acctidbymxz['DataDate']
-                    prdcode = dict_facct_holding_aggr_by_acctidbymxz['PrdCode']
-                    dict_holding_aggr_by_secid_first_part = (
-                        dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
-                    )
-                    if 'IC' in dict_holding_aggr_by_secid_first_part:
-                        iclots_after_exposure_adjustment = dict_holding_aggr_by_secid_first_part['IC']
+                i_accts_f_t = len(list_dicts_acctinfo_facct)
+                if i_accts_f_t != 1:
+                    raise ValueError('Wrong facct number, please check col_acctinfo.')
+
+                # todo 重要假设：期货空头只使用IC
+                dict_acctinfo_facct = list_dicts_acctinfo_facct[0]
+                acctidbymxz = dict_acctinfo_facct['AcctIDByMXZ']
+
+                dict_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
+                dict_holding_aggr_by_acctidbymxz = (
+                    dict_facct_holding_aggr_by_acctidbymxz['holding_aggr_by_secid_first_part']
+                )
+                if 'IC' in dict_holding_aggr_by_acctidbymxz:
+                    iclots_in_facct_holding_aggr_by_acctidbymxz = dict_holding_aggr_by_acctidbymxz['IC']
+                else:
+                    iclots_in_facct_holding_aggr_by_acctidbymxz = 0
+
+                iclots_after_exposure_adjustment = (
+                        iclots_in_facct_holding_aggr_by_acctidbymxz - iclots_rounded2adjust_exposure_by_prdcode
+                )
+
+                dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
+                    'DataDate': self.str_today,
+                    'AcctIDByMXZ': acctidbymxz,
+                    'PrdCode': self.prdcode,
+                    'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
+                }
+                list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
+                    dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
+                )
+
+                if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
+                    if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                        if iclots_after_exposure_adjustment > 0:
+                            str_order_exposure_adjustment = (
+                                f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                            )
+                        else:
+                            str_order_exposure_adjustment = (
+                                f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                            )
+                    elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                        if iclots_after_exposure_adjustment >= 0:
+                            str_order_exposure_adjustment = (
+                                f'平{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC多头'
+                            )
+                        else:
+                            str_order_exposure_adjustment = (
+                                f'开{abs(iclots_rounded2adjust_exposure_by_prdcode)}手IC空头'
+                            )
                     else:
-                        iclots_after_exposure_adjustment = 0
-                    dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
-                        'DataDate': datadate,
-                        'AcctIDByMXZ': acctidbymxz,
-                        'PrdCode': prdcode,
-                        'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
-                    }
-                    list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
-                        dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
-                    )
-        else:
+                        str_order_exposure_adjustment = ''
+                else:
+                    if iclots_rounded2adjust_exposure_by_prdcode < 0:  # Buy
+                        str_order_exposure_adjustment = (
+                            f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
+                            f'开{abs(iclots_after_exposure_adjustment)}手IC多头'
+                        )
+                    elif iclots_rounded2adjust_exposure_by_prdcode > 0:  # Sell
+                        str_order_exposure_adjustment = (
+                            f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
+                            f'开{abs(iclots_after_exposure_adjustment)}手IC空头'
+                        )
+                    else:
+                        str_order_exposure_adjustment = ''
+        else:  # 若无敞口调整事项，则list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz不变
             list_dicts_facct_holding_aggr_by_acctidbymxz = self.gv.col_facct_holding_aggr_by_acctidbymxz.find(
                 {'DataDate': self.str_today, 'PrdCode': self.prdcode}
             )
@@ -2218,6 +2297,7 @@ class Product:
                             {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
                         )
                         approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
+                        # todo 敞口调整导致触发追保线的警告
                         if iclots_warning_margin_from_exposure_adjustment > approximate_na:
                             str_warning_from_exposure_adjustment = '（Waring: 调敞口导致期货户触发0.16）'
 
@@ -2341,9 +2421,9 @@ class Product:
         else:
             str_orders_exposure_adjustment_and_position_and_warning = f"{str_orders_exposure_adjustment_and_position}"
 
-
-
         signals_on_trdplan = self.dict_prdinfo['SignalsOnTrdPlan']
+
+        # 凡是在今日仍保留的划款事项，均会体现到trdplan中。但只有状态为2与3的事项，才会影响tgtna 的计算。
         list_dicts_dwitems = list(
             self.gv.db_trddata['manually_patchdata_dwitems'].find(
                 {'DataDate': self.str_today, 'PrdCode': self.prdcode}
@@ -2351,20 +2431,29 @@ class Product:
         )
         str_dwitems = ''
         for dict_dwitems in list_dicts_dwitems:
-            dwtype = dict_dwitems['DWItem']
-            if dwtype == 'P':
-                str_dwtype_display = '申购'
-            elif dwtype == 'R':
-                str_dwtype_display = '赎回'
-            elif dwtype == 'DD':
-                str_dwtype_display = '分红'
-            else:
-                str_dwtype_display = dwtype
-            dwbgt_net_amt = round(dict_dwitems['DWBGTNetAmt']/10000)
+            dwbgt_netamt_estimated = round(dict_dwitems['DWBGTNetAmtEstimated'] / 10000)
             str_confirmation_date = dict_dwitems['UNAVConfirmationDate']
             str_expected_dwdate = dict_dwitems['ExpectedDWDate']
-            str_dwitems += (f'{str_dwtype_display}{dwbgt_net_amt}万, 按照{str_confirmation_date}净值 '
-                            f'{str_expected_dwdate}划款.\n')
+            dwtype = dict_dwitems['DWItem']
+            if dwtype == 'P':
+                str_dwitems_delta = (
+                    f'申购{abs(dwbgt_netamt_estimated)}万 '
+                    f'按照{str_confirmation_date}净值 {str_expected_dwdate}划款.\n'
+                )
+            elif dwtype == 'R':
+                redemption_shares = dict_dwitems['Shares']
+                str_dwitems_delta = (
+                    f'赎回{abs(redemption_shares)}份（约计{abs(dwbgt_netamt_estimated)}万） '
+                    f'按照{str_confirmation_date}净值 {str_expected_dwdate}划款.\n'
+                )
+            else:
+                str_dwtype_display = dwtype
+                str_dwitems_delta = (
+                    f'{str_dwtype_display}{abs(dwbgt_netamt_estimated)}万 '
+                    f'按照{str_confirmation_date}净值 {str_expected_dwdate}划款.\n'
+                )
+            str_dwitems += str_dwitems_delta
+
         accrued_performance_compensation_according_to_alpha_mark = self.dict_prdinfo['超额计提']
         if accrued_performance_compensation_according_to_alpha_mark:
             str_apcata_mark = 'y'
@@ -2525,8 +2614,9 @@ class Account(Product):
                                                          .groupby(by='direction')
                                                          .sum()
                                                          .to_dict())
-            dict_direction2margin_required_in_perfect_shape = \
+            dict_direction2margin_required_in_perfect_shape = (
                 dicts_future_api_holding_sum_by_direction['margin_required_in_perfect_shape']
+            )
             dict_direction2margin_warning = dicts_future_api_holding_sum_by_direction['margin_warning']
             if 'long' not in dict_direction2margin_required_in_perfect_shape:
                 dict_direction2margin_required_in_perfect_shape['long'] = 0
@@ -2653,13 +2743,15 @@ class MainFrameWork:
             writer.save()
 
     def run(self):
+        # self.list_prdcodes.remove('918')
         for prdcode in self.list_prdcodes:
-            prd = Product(self.gv, prdcode)
-            prd.budget()
-            prd.output_trdplan_order()
-            prd.check_exception()
-            prd.check_exposure()
-            print(f'{prdcode} trdplan finished.')
+            if prdcode in ['913']:
+                prd = Product(self.gv, prdcode)
+                prd.budget()
+                prd.output_trdplan_order()
+                prd.check_exception()
+                prd.check_exposure()
+                print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
