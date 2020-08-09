@@ -66,7 +66,7 @@ class PrintFutureFmttedInfo:
             self.list_dicts_display_holding.append(dict_display_holding)
         df_holding = pd.DataFrame(self.list_dicts_display_holding)
 
-        list_dicts_future_api_trdrec = self.col_future_api_trdrec.find({'DataDate': self.str_today})
+        list_dicts_future_api_trdrec = list(self.col_future_api_trdrec.find({'DataDate': self.str_today}))
         if list_dicts_future_api_trdrec:
 
             for dict_future_api_trdrec in list_dicts_future_api_trdrec:

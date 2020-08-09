@@ -74,7 +74,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200804'
+        # self.str_today = '20200806'
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -205,7 +205,7 @@ class DBTradingData:
             list_ret.append(dict_rec_capital)
 
         elif str_c_h_secliability_mark == 'holding':
-            if data_source_type in ['zhaos_tdx','xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
+            if data_source_type in ['zhaos_tdx', 'xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
                                     'huat_tdx'] and accttype in ['c', 'm']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
