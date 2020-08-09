@@ -2834,7 +2834,6 @@ class Product:
     def output_trdplan_order(self):
         """
         # todo 更改： 查敞口
-
         """
         # 今资金划转计划
         list_dicts_bgt_by_acctidbymxz = list(
@@ -3931,13 +3930,12 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['918']:
-                prd = Product(self.gv, prdcode)
-                prd.budget()
-                prd.output_trdplan_order()
-                prd.check_exception()
-                prd.check_exposure()
-                print(f'{prdcode} trdplan finished.')
+            prd = Product(self.gv, prdcode)
+            prd.budget()
+            prd.output_trdplan_order()
+            prd.check_exception()
+            prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

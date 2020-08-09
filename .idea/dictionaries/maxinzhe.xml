@@ -76,6 +76,7 @@
       <w>huat</w>
       <w>iclots</w>
       <w>indexfuture</w>
+      <w>jzpb</w>
       <w>liabilityamt</w>
       <w>liabilityqty</w>
       <w>localholst</w>
@@ -166,9 +167,11 @@
       <w>underlyingsec</w>
       <w>underlyingsecid</w>
       <w>underlyingsecsrc</w>
+      <w>unknow</w>
       <w>vecqty</w>
       <w>wcode</w>
       <w>wcodes</w>
+      <w>wealthcats</w>
       <w>windcode</w>
       <w>windcodes</w>
       <w>wset</w>

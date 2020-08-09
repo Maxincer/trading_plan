@@ -1,5 +1,9 @@
-fpath_zx = r'D:\projects\trading_plan\data\trdrec_from_trdclient\922_c_zx_0322.txt'
+
+
+
+fpath_zx = r'D:\projects\trading_plan\data\trdrec_from_trdclient\20200809holding.xls'
 with open(fpath_zx, 'rb') as f:
-    lines = f.readlines()
-    for line in lines:
-        print(line)
+    list_datalines = f.readlines()
+    for dataline in list_datalines:
+        dataline = dataline.strip().decode('gbk').replace('=', '').replace('"', '').split('\t')
+        print(dataline)
