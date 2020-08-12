@@ -117,12 +117,31 @@ class PrintFutureFmttedInfo:
             df_trdrec_details.to_excel(writer, sheet_name='trdrec_details', index=False)
             worksheet_capital = writer.sheets['capital']
             worksheet_capital.set_column('A:B', 17.75)
+            worksheet_capital.set_column('C:C', 9)
+            worksheet_capital.set_column('D:D', 12.63)
+            worksheet_capital.set_column('E:E', 9)
+            worksheet_capital.set_column('F:F', 10.13)
+            worksheet_capital.set_column('G:G', 12.13)
+            worksheet_capital.set_column('H:H', 24.38)
             worksheet_holding = writer.sheets['holding']
             worksheet_holding.set_column('A:B', 17.75)
+            worksheet_holding.set_column('C:C', 9)
+            worksheet_holding.set_column('D:E', 12.63)
+            worksheet_holding.set_column('F:F', 5)
             worksheet_trdrec_aggr = writer.sheets['trdrec_aggr']
             worksheet_trdrec_aggr.set_column('A:B', 17.75)
+            worksheet_trdrec_aggr.set_column('C:C', 9)
+            worksheet_trdrec_aggr.set_column('D:D', 12.63)
+            worksheet_trdrec_aggr.set_column('E:E', 5)
             worksheet_trdrec_details = writer.sheets['trdrec_details']
             worksheet_trdrec_details.set_column('A:B', 17.75)
+            worksheet_trdrec_details.set_column('C:C', 9)
+            worksheet_trdrec_details.set_column('D:D', 11.38)
+            worksheet_trdrec_details.set_column('E:E', 12.63)
+            worksheet_trdrec_details.set_column('F:F', 11.38)
+            worksheet_trdrec_details.set_column('G:G', 8)
+            worksheet_trdrec_details.set_column('H:H', 4.5)
+            worksheet_trdrec_details.set_column('I:I', 6.88)
             writer.save()
             print('Generate Future TrdRec Finished')
 

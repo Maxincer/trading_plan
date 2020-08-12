@@ -76,7 +76,6 @@ class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
-        self.str_today = '20200806'
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -112,7 +111,8 @@ class DBTradingData:
     def read_rawdata_from_trdclient(self, fpath, str_c_h_secliability_mark, data_source_type, accttype, acctidbybroker):
         """
         从客户端下载数据，并进行初步清洗。为字符串格式。
-        从客户端下载数据，并进行初步清洗。为字符串格式。
+        tdx倒出的txt文件有“五粮液错误”，使用xls格式的可解决
+
         已更新券商处理格式：
             华泰: hexin, txt, cash, margin, capital, holding
             国君: 富易, csv
@@ -123,10 +123,12 @@ class DBTradingData:
             民生: tdx, txt
             华福: tdx, txt
 
+        :param acctidbybroker: 用于pb类文件对账户编号的过滤。
         :param fpath:
         :param accttype: c: cash, m: margin, f: future
         :param str_c_h_secliability_mark: ['capital', 'holding', 'secliability']
         :param data_source_type:
+
         :return: list: 由dict rec组成的list
         """
         list_ret = []
@@ -174,9 +176,9 @@ class DBTradingData:
                 df_read = pd.read_excel(fpath, skiprows=1, nrows=1)
                 dict_rec_capital = df_read.to_dict('records')[0]
 
-            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
-                                      'zhaos_tdx', 'huat_tdx'] and accttype in ['c', 'm']:
-                with open(fpath, 'rb') as f:
+            elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx'] and accttype in ['c', 'm']:
+                # todo 存在五粮液错误
+                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     dataline = list_datalines[0][8:]
                     list_recdata = dataline.strip().decode('gbk').split()
@@ -184,7 +186,8 @@ class DBTradingData:
                         list_recdata = recdata.split(':')
                         dict_rec_capital.update({list_recdata[0]: list_recdata[1]})
 
-            elif data_source_type in ['wk_tdx'] and accttype in ['c', 'm']:
+            elif data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx'] and accttype in ['c', 'm']:
+                # 改为xls版本，避免'五粮液错误'
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].strip().decode('gbk').replace('=', '').replace('"', '').split('\t')
@@ -210,7 +213,6 @@ class DBTradingData:
                 pass
 
             elif data_source_type in ['zx_wealthcats']:
-                # todo 注意处理一个账户多条信息的情况
                 fpath = fpath.replace('YYYY-MM-DD', self.dt_today.strftime('%Y-%m-%d'))
                 with codecs.open(fpath, 'rb', 'utf-8-sig') as f:
                     list_datalines = f.readlines()
@@ -239,8 +241,8 @@ class DBTradingData:
             list_ret.append(dict_rec_capital)
 
         elif str_c_h_secliability_mark == 'holding':
-            if data_source_type in ['zhaos_tdx', 'xc_tdx', 'zx_tdx', 'ms_tdx', 'hf_tdx',
-                                    'huat_tdx'] and accttype in ['c', 'm']:
+            if data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx'] and accttype in ['c', 'm']:
+                # todo 存在五粮液错误
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     start_index_holding = None
@@ -261,7 +263,8 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-            if data_source_type in ['wk_tdx'] and accttype in ['c', 'm']:
+            if data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx'] and accttype in ['c', 'm']:
+                # 避免五粮液错误
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_list_data = [

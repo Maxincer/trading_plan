@@ -84,16 +84,14 @@ todo:
         1. 期货户持仓变动触发： balance exposure
     2. 国债逆回购（核新系统）不在下载的数据文件之内，如何添加？
     3. 国债逆回购不同系统的单位价格确认。（核新为1000，有没有100的情况？）
-    4. 申赎款
-    5. 分渠道的资金分配
     6. 负债（融券与场外，利息的）的计算需要改进：
         1. 目前状态仅在patchdata 更新时考虑了利息，在源数据的读取中没有考虑利息。
         2. 源数据中提供了利息的应还与未还数据，故可以改进算法，精准计算。
         3. 目前的na=总资产-负债，负债中未计算利息的产品，na会被高估
     5. AcctType 中的c,m,f,o 统一改为大写
-    6. 交易计划表述，按照专门的表来处理
-    7. 期货户检查是否有对，影响保证金
     8. budget算法改进： 当不满仓时，要留足期货户资金
+    9. 多渠道最大值算法需要商定
+    10. 申赎款项的自动化
 
 Sympy:
     1. Sympy 中的 solveset， 不能解多元非线性方程组（带domain的），但是solve可以。
@@ -124,7 +122,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200806'
+        # self.str_today = '20200806'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -2635,7 +2633,8 @@ class Product:
         mn_iclots_src1 = Symbol('mn_iclots_src1', real=True)
         list_eqs_2b_solved = []
 
-        if self.gv.flt_cash2cpslongamt == 9:
+        if self.tgt_cpspct == 9:
+            # todo
             eq_ei_ce_src1 = ei_ce_from_cash_available_src1
             eq_mn_ce_src1 = mn_ce_from_cash_available_src1
             list_eqs_2b_solved.append(eq_ei_ce_src1)
@@ -2705,7 +2704,7 @@ class Product:
                                                        ei_iclots_src1, mn_iclots_src1)
         tuple_eqs_solve = list_tuples_eqs_solve_under_max_cpspct[0]
         ei_cpslongamt_src1 = float(tuple_eqs_solve[0])
-        ei_ce_from_cash_available_src1= float(tuple_eqs_solve[1])
+        ei_ce_from_cash_available_src1 = float(tuple_eqs_solve[1])
         mn_cpslongamt_src1 = float(tuple_eqs_solve[2])
         mn_ce_from_cash_available_src1 = float(tuple_eqs_solve[3])
         ei_iclots_src1 = float(tuple_eqs_solve[4])
@@ -2832,9 +2831,7 @@ class Product:
         self.allocate_faccts(iclots_total)
 
     def output_trdplan_order(self):
-        """
-        # todo 更改： 查敞口
-        """
+        # todo 添加过滤器
         # 今资金划转计划
         list_dicts_bgt_by_acctidbymxz = list(
             self.gv.col_bgt_by_acctidbymxz
@@ -3045,10 +3042,6 @@ class Product:
         list_str_orders_capital = list_str_orders_capital_outflow + list_str_orders_capital_inflow
         str_orders_capital = '\n'.join(list_str_orders_capital)
         # 今交易组合计划开始
-
-        # 今组合交易计划 - 对下午交易的产品调整敞口
-        # 逻辑：在下午有交易开始时间的产品，在开盘时使用期指调整敞口，并对交易端进行监控
-
         # 在内存建立数据表类型条目，记录调整敞口后的各期货账户holding
         list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = []
         str_order_exposure_adjustment = ''
@@ -3692,8 +3685,8 @@ class Product:
 
         dict_trdplan_orders2gv = {
             '产品代码': self.prdcode,
-            '证券自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
-            '期货自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
+            '证券自动交易': ' ',
+            '期货自动交易': ' ',
             '产品名称': self.prdname,
             '总规模': f'{round(self.prd_approximate_na/10000)}',
             '最新净值': f'{round(self.latest_rptunav, 4)}',
@@ -3701,11 +3694,11 @@ class Product:
             '今资金划转计划': str_orders_capital,
             '今资金划转执行': '',
             '明资金划转计划': '',
-            '今组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
-            '今组合交易执行': '',
-            '明组合交易计划': str_dwitems,
+            '今日组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
+            '今日组合交易执行': '',
+            '明日组合交易计划': str_dwitems,
             '注意事项': '',
-            '超额\n计提': str_apcata_mark,
+            '超额计提': str_apcata_mark,
             '当前股票持仓': str_cpslongamt,
             '当前期指持仓': str_future_index,
             '备注': '',
@@ -3715,8 +3708,8 @@ class Product:
         dict_trdplan_orders2mongodb = {
             'DataDate': self.str_today,
             '产品代码': self.prdcode,
-            '证券自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
-            '期货自\n动交易': ' ',  # todo 到内网机读取昨日数据并填写
+            '证券自动交易': ' ',
+            '期货自动交易': ' ',
             '产品名称': self.prdname,
             '总规模': f'{round(self.prd_approximate_na / 10000)}',
             '最新净值': f'{round(self.latest_rptunav, 4)}',
@@ -3724,11 +3717,11 @@ class Product:
             '今资金划转计划': str_orders_capital,
             '今资金划转执行': '',
             '明资金划转计划': '',
-            '今组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
-            '今组合交易执行': '',
-            '明组合交易计划': str_dwitems,
+            '今日组合交易计划': str_orders_exposure_adjustment_and_position_and_warning,
+            '今日组合交易执行': '',
+            '明日组合交易计划': str_dwitems,
             '注意事项': '',
-            '超额\n计提': str_apcata_mark,
+            '超额计提': str_apcata_mark,
             '当前股票持仓': str_cpslongamt,
             '当前期指持仓': str_future_index,
             '备注': '',
@@ -3863,6 +3856,7 @@ class MainFrameWork:
         self.list_prdcodes = self.gv.list_prdcodes
 
     def generate_excel(self):
+        # 生成交易计划页
         df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
         fn_trdplan = f'data/trdplan_auto/trdplan_mxz-{self.gv.str_next_trddate}.xlsx'
         with pd.ExcelWriter(fn_trdplan) as writer:
@@ -3928,14 +3922,18 @@ class MainFrameWork:
                 worksheet_trdplan.set_row(idx, 80)
             writer.save()
 
+        # 生成目标持仓页
+        # 字段： PrdCode, AcctIDByMXZ, AcctIDByBroker, AcctIDByXuJie4Trd, AcctIDByXuXiaoQiang4Trd, AdjustedValue
+
     def run(self):
         for prdcode in self.list_prdcodes:
-            prd = Product(self.gv, prdcode)
-            prd.budget()
-            prd.output_trdplan_order()
-            prd.check_exception()
-            prd.check_exposure()
-            print(f'{prdcode} trdplan finished.')
+            if prdcode in ['702', '707', '913', '918', '929']:
+                prd = Product(self.gv, prdcode)
+                prd.budget()
+                prd.output_trdplan_order()
+                prd.check_exception()
+                prd.check_exposure()
+                print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

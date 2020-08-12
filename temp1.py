@@ -1,9 +1,6 @@
+# coding: utf8
 
-
-
-fpath_zx = r'D:\projects\trading_plan\data\trdrec_from_trdclient\20200809holding.xls'
-with open(fpath_zx, 'rb') as f:
-    list_datalines = f.readlines()
-    for dataline in list_datalines:
-        dataline = dataline.strip().decode('gbk').replace('=', '').replace('"', '').split('\t')
-        print(dataline)
+import pandas as pd
+fpath_ax = '//192.168.2.149/ax_auto_export_data/普通账户持仓20200811.csv'
+df_temp = pd.read_csv(fpath_ax, encoding='ansi')
+print(df_temp)
