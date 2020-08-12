@@ -501,7 +501,6 @@ class DBTradingData:
                                                                    'AcctIDByMXZ': acctidbymxz})
                 if list_future_data_holding:
                     self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
-
             # todo 可用线程搞定
             sleep(1)
             dict_res_trdrec = trader.query_trading()
@@ -516,6 +515,7 @@ class DBTradingData:
                                                                   'AcctIDByMXZ': acctidbymxz})
                 if list_future_data_trdrec:
                     self.db_trddata['future_api_trdrec'].insert_many(list_future_data_trdrec)
+            print(f'{acctidbymxz} update finished!')
 
     def update_manually_patchdata(self):
         """

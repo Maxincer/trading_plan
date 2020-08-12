@@ -4,6 +4,9 @@
       <w>acctid</w>
       <w>acctidbybroker</w>
       <w>acctidbymxz</w>
+      <w>acctidbyxj</w>
+      <w>acctidbyxujie</w>
+      <w>acctidbyxxq</w>
       <w>acctids</w>
       <w>acctidsbymxz</w>
       <w>acctinfo</w>
@@ -148,6 +151,7 @@
       <w>swapamt</w>
       <w>swhy</w>
       <w>szse</w>
+      <w>tgtcpsamt</w>
       <w>tgtitems</w>
       <w>tgtna</w>
       <w>tgtprdna</w>

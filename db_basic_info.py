@@ -32,6 +32,8 @@ class DatabaseBasicInfo:
                                     dtype={
                                         'AcctIDByBroker': str,
                                         'AcctIDByMXZ': str,
+                                        'AcctIDByXuJie4Trd': str,
+                                        'AcctIDByXuXiaoQiang4Trd': str,
                                         'AcctStatus': str,
                                         'AcctType': str,
                                         'BrokerAlias': str,

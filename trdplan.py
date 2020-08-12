@@ -188,6 +188,7 @@ class GlobalVariable:
         self.col_facct_holding_aggr_by_acctidbymxz = self.db_trddata['facct_holding_aggr_by_acctidbymxz']
         self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
         self.col_trdplan_output = self.db_trddata['trdplan_output']
+        self.col_tgtcpsamt = self.db_trddata['tgtcpsamt']
         self.col_trdplan_expression = self.db_basicinfo['trdplan_expression']
         self.dict_prdcode2special_na_src1 = {'707': 5000000}  # 人工T0处理
         # todo 以下代码需要改进
@@ -2298,10 +2299,13 @@ class Product:
                             cpslongamt_in_cacct_src2 = cpslongamt_src2
                             cash_available_in_cacct_src2 = cpslongamt_in_cacct_src2 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src2 = ce_from_cash_available_src2
+                            na_cacct_src2 = cpslongamt_in_cacct_src2 + cash_available_in_cacct_src2 + ce_in_cacct_src2
+
                             # 第三个渠道（非信用户渠道）的数据
                             cpslongamt_in_cacct_src3 = cpslongamt_src3
                             cash_available_in_cacct_src3 = cpslongamt_in_cacct_src3 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src3 = ce_from_cash_available_src3
+                            na_cacct_src3 = cpslongamt_in_cacct_src3 + cash_available_in_cacct_src3 + ce_in_cacct_src3
 
                         elif idx_capital_source == 1:  # 第二个渠道为信用户渠道
                             dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
@@ -2341,10 +2345,12 @@ class Product:
                             cpslongamt_in_cacct_src1 = cpslongamt_src1
                             cash_available_in_cacct_src1 = cpslongamt_in_cacct_src1 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src1 = ce_from_cash_available_src1
+                            na_cacct_src1 = cpslongamt_in_cacct_src1 + cash_available_in_cacct_src1 + ce_in_cacct_src1
                             # 写第三个渠道（非信用户渠道）的数据
                             cpslongamt_in_cacct_src3 = cpslongamt_src3
                             cash_available_in_cacct_src3 = cpslongamt_in_cacct_src3 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src3 = ce_from_cash_available_src3
+                            na_cacct_src3 = cpslongamt_in_cacct_src3 + cash_available_in_cacct_src3 + ce_in_cacct_src3
 
                         elif idx_capital_source == 2:  # 第三个渠道为信用户渠道
                             dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
@@ -2383,10 +2389,12 @@ class Product:
                             cpslongamt_in_cacct_src1 = cpslongamt_src1
                             cash_available_in_cacct_src1 = cpslongamt_in_cacct_src1 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src1 = ce_from_cash_available_src1
+                            na_cacct_src1 = cpslongamt_in_cacct_src1 + cash_available_in_cacct_src1 + ce_in_cacct_src1
                             # 写第二个渠道（非信用户渠道）的数据
                             cpslongamt_in_cacct_src2 = cpslongamt_src2
                             cash_available_in_cacct_src2 = cpslongamt_in_cacct_src2 * self.gv.flt_cash2cpslongamt
                             ce_in_cacct_src2 = ce_from_cash_available_src2
+                            na_cacct_src2 = cpslongamt_in_cacct_src2 + cash_available_in_cacct_src2 + ce_in_cacct_src2
 
                         else:
                             raise ValueError('Unknown capital source when allocate sources.')
@@ -2634,7 +2642,6 @@ class Product:
         list_eqs_2b_solved = []
 
         if self.tgt_cpspct == 9:
-            # todo
             eq_ei_ce_src1 = ei_ce_from_cash_available_src1
             eq_mn_ce_src1 = mn_ce_from_cash_available_src1
             list_eqs_2b_solved.append(eq_ei_ce_src1)
@@ -2646,6 +2653,7 @@ class Product:
             list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
         # 核心方程组-总资产等式
+        # todo 检查ei方程 要不要合一起？ 多策略产品的期指会出现节省金额
         eq_ei_na_src1 = (
                 ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
                 + ei_ce_from_cash_available_src1
@@ -2653,12 +2661,9 @@ class Product:
                 + ei_etflongamt_src1
                 + ei_special_na_src1
                 + abs(ei_iclots_src1) * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
-                + ei_na_oaccts_src1
-                + ei_capital_debt_src1
                 - ei_na_src1_tgt
                 - ei_liability_src1
         )
-        list_eqs_2b_solved.append(eq_ei_na_src1)
 
         eq_mn_na_src1 = (
                 mn_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
@@ -2674,6 +2679,32 @@ class Product:
                 - mn_liability_in_oacct_src1
         )
         list_eqs_2b_solved.append(eq_mn_na_src1)
+        list_eqs_2b_solved.append(eq_ei_na_src1)
+
+        # # 核心方程组-净资产
+        # eq_na_src1 = (
+        #         ei_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+        #         + ei_ce_from_cash_available_src1
+        #         + ei_ce_from_ss_src1
+        #         + ei_etflongamt_src1
+        #         + ei_special_na_src1
+        #         + abs(ei_iclots_src1 + mn_iclots_src1)
+        #         * self.gv.dict_index_future2internal_required_na_per_lot[self.gv.index_future]
+        #         - ei_na_src1_tgt
+        #         - ei_liability_src1
+        #         + mn_cpslongamt_src1 * (1 + self.gv.flt_cash2cpslongamt)
+        #         + mn_ce_from_cash_available_src1
+        #         + mn_ce_from_ss_src1
+        #         + mn_etflongamt_src1
+        #         + mn_special_na_src1
+        #         + mn_ttasset_oacct
+        #         - mn_na_src1_tgt
+        #         - mn_capital_debt_in_macct_src1
+        #         - mn_security_debt_in_macct_src1
+        #         - mn_liability_in_oacct_src1
+        # )
+        #
+        # list_eqs_2b_solved.append(eq_na_src1)
 
         # 核心方程组-暴露
         eq_ei_exposure = (
@@ -2685,7 +2716,6 @@ class Product:
                 + ei_net_exposure_from_oaccts_src1
                 - self.ei_na_tgt * 0.99
         )
-        list_eqs_2b_solved.append(eq_ei_exposure)
 
         eq_mn_exposure = (
                 mn_cpslongamt_src1
@@ -2695,8 +2725,24 @@ class Product:
                 - mn_etfshortamt_src1
                 + mn_net_exposure_from_oaccts_src1
         )
+        list_eqs_2b_solved.append(eq_ei_exposure)
         list_eqs_2b_solved.append(eq_mn_exposure)
 
+        # eq_exposure = (
+        #         ei_cpslongamt_src1
+        #         + ei_etflongamt_src1
+        #         + (ei_iclots_src1 + mn_iclots_src1) * self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
+        #         - ei_cpsshortamt_src1
+        #         - ei_etfshortamt_src1
+        #         + ei_net_exposure_from_oaccts_src1
+        #         - self.ei_na_tgt * 0.99
+        #         + mn_cpslongamt_src1
+        #         + mn_etflongamt_src1
+        #         - mn_cpsshortamt_src1
+        #         - mn_etfshortamt_src1
+        #         + mn_net_exposure_from_oaccts_src1
+        # )
+        # list_eqs_2b_solved.append(eq_exposure)
         # 解核心方程组（满仓状态）
         list_tuples_eqs_solve_under_max_cpspct = solve(list_eqs_2b_solved,
                                                        ei_cpslongamt_src1, ei_ce_from_cash_available_src1,
@@ -3731,6 +3777,44 @@ class Product:
         if dict_trdplan_orders2gv:
             self.gv.col_trdplan_output.insert_one(dict_trdplan_orders2mongodb)
 
+    def output_tgtcpsamt(self):
+        list_dicts_acctinfo = self.gv.col_acctinfo.find(
+            {
+                'DataDate': self.str_today,
+                'PrdCode': self.prdcode,
+                'SpecialAccountMark': 0,
+                'AcctStatus': 'T',
+                'RptMark': 1,
+            }
+        )
+        list_dicts_tgtcpsamt = []
+        for dict_acctinfo in list_dicts_acctinfo:
+            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
+            accttype = dict_acctinfo['AcctType']
+            if accttype in ['c', 'm']:
+                dict_cpsamt_in_bgt = self.gv.col_bgt_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
+                if dict_cpsamt_in_bgt:
+                    tgtcpsamt = dict_cpsamt_in_bgt['CPSLongAmt']
+                    dict_acctinfo = self.gv.col_acctinfo.find_one(
+                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                    )
+                    acctidbyxj4trd = dict_acctinfo['AcctIDByXuJie4Trd']
+                    acctidbyxxq4trd = dict_acctinfo['AcctIDByXuXiaoQiang4Trd']
+                    dict_tgtcpsamt = {
+                        'DataDate': self.str_today,
+                        'AcctIDByMXZ': acctidbymxz,
+                        'PrdCode': self.prdcode,
+                        'AcctIDByXuJie4Trd': acctidbyxj4trd,
+                        'AcctIDByXuXiaoQiang4Trd': acctidbyxxq4trd,
+                        'TgtCpsAmt': tgtcpsamt
+                    }
+                    list_dicts_tgtcpsamt.append(dict_tgtcpsamt)
+        self.gv.col_tgtcpsamt.delete_many({'DataDate': self.str_today, 'PrdCode': self.prdcode, })
+        if list_dicts_tgtcpsamt:
+            self.gv.col_tgtcpsamt.insert_many(list_dicts_tgtcpsamt)
+
 
 class Account(Product):
     def __init__(self, gv, acctidbymxz):
@@ -3858,8 +3942,13 @@ class MainFrameWork:
     def generate_excel(self):
         # 生成交易计划页
         df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
+        list_dicts_tgtcpsamt = list(
+            self.gv.col_tgtcpsamt.find({'DataDate': self.gv.str_today}, {'_id': 0})
+        )
+        df_tgtcpsamt = pd.DataFrame(list_dicts_tgtcpsamt).T.reset_index().T
         fn_trdplan = f'data/trdplan_auto/trdplan_mxz-{self.gv.str_next_trddate}.xlsx'
         with pd.ExcelWriter(fn_trdplan) as writer:
+            # 格式化 trdplan 页
             df_trdplan.to_excel(writer, sheet_name='交易计划', index=False, header=False)
             worksheet_trdplan = writer.sheets['交易计划']
             fmt_header = writer.book.add_format(
@@ -3920,17 +4009,27 @@ class MainFrameWork:
             worksheet_trdplan.autofilter(0, 0, 0, 17)
             for idx in range(1, 40):
                 worksheet_trdplan.set_row(idx, 80)
-            writer.save()
 
-        # 生成目标持仓页
-        # 字段： PrdCode, AcctIDByMXZ, AcctIDByBroker, AcctIDByXuJie4Trd, AcctIDByXuXiaoQiang4Trd, AdjustedValue
+            # 生成目标持仓页
+            # 字段： PrdCode, AcctIDByMXZ, AcctIDByBroker, AcctIDByXuJie4Trd, AcctIDByXuXiaoQiang4Trd, AdjustedValue
+
+            df_tgtcpsamt.to_excel(writer, sheet_name='目标持仓', index=False, header=False)
+            worksheet_tgtcpsamt = writer.sheets['目标持仓']
+            worksheet_tgtcpsamt.set_column('A:A', 8.88)
+            worksheet_tgtcpsamt.set_column('B:B', 18.75)
+            worksheet_tgtcpsamt.set_column('C:C', 7.88)
+            worksheet_tgtcpsamt.set_column('D:D', 18.75)
+            worksheet_tgtcpsamt.set_column('E:E', 25.5)
+            worksheet_tgtcpsamt.set_column('F:F', 12.13)
+            writer.save()
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['702', '707', '913', '918', '929']:
+            if prdcode in ['930']:
                 prd = Product(self.gv, prdcode)
                 prd.budget()
                 prd.output_trdplan_order()
+                prd.output_tgtcpsamt()
                 prd.check_exception()
                 prd.check_exposure()
                 print(f'{prdcode} trdplan finished.')
