@@ -80,8 +80,6 @@ Abbr.:
     3. EI: Enhanced Index
     4. cpspct: composite percentage: composite amt / net asset value
 todo:
-    1. 期货户持仓变动时，需要试算可用保证金是否充足
-        1. 期货户持仓变动触发： balance exposure
     2. 国债逆回购（核新系统）不在下载的数据文件之内，如何添加？
     3. 国债逆回购不同系统的单位价格确认。（核新为1000，有没有100的情况？）
     6. 负债（融券与场外，利息的）的计算需要改进：
@@ -122,7 +120,6 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        # self.str_today = '20200806'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -3795,8 +3792,18 @@ class Product:
                 dict_cpsamt_in_bgt = self.gv.col_bgt_by_acctidbymxz.find_one(
                     {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
                 )
+                dict_cpsamt_in_bs = self.gv.col_bs_by_acctidbymxz.find_one(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
                 if dict_cpsamt_in_bgt:
                     tgtcpsamt = dict_cpsamt_in_bgt['CPSLongAmt']
+                    dict_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find_one(
+                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                    )
+                    if dict_bs_by_acctidbymxz:
+                        real_cpsamt_pre_date = dict_cpsamt_in_bs['CompositeLongAmt']
+                    else:
+                        real_cpsamt_pre_date = 0
                     dict_acctinfo = self.gv.col_acctinfo.find_one(
                         {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
                     )
@@ -3808,7 +3815,8 @@ class Product:
                         'PrdCode': self.prdcode,
                         'AcctIDByXuJie4Trd': acctidbyxj4trd,
                         'AcctIDByXuXiaoQiang4Trd': acctidbyxxq4trd,
-                        'TgtCpsAmt': tgtcpsamt
+                        'TgtCpsAmt': tgtcpsamt,
+                        'RealCpsAmtPreDate': real_cpsamt_pre_date,
                     }
                     list_dicts_tgtcpsamt.append(dict_tgtcpsamt)
         self.gv.col_tgtcpsamt.delete_many({'DataDate': self.str_today, 'PrdCode': self.prdcode, })
@@ -4021,18 +4029,19 @@ class MainFrameWork:
             worksheet_tgtcpsamt.set_column('D:D', 18.75)
             worksheet_tgtcpsamt.set_column('E:E', 25.5)
             worksheet_tgtcpsamt.set_column('F:F', 12.13)
+            worksheet_tgtcpsamt.set_column('F:F', 18.75)
             writer.save()
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['930']:
-                prd = Product(self.gv, prdcode)
-                prd.budget()
-                prd.output_trdplan_order()
-                prd.output_tgtcpsamt()
-                prd.check_exception()
-                prd.check_exposure()
-                print(f'{prdcode} trdplan finished.')
+            # if prdcode in ['930']:
+            prd = Product(self.gv, prdcode)
+            prd.budget()
+            prd.output_trdplan_order()
+            prd.output_tgtcpsamt()
+            prd.check_exception()
+            prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

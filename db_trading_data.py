@@ -186,8 +186,8 @@ class DBTradingData:
                         list_recdata = recdata.split(':')
                         dict_rec_capital.update({list_recdata[0]: list_recdata[1]})
 
-            elif data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx'] and accttype in ['c', 'm']:
-                # 改为xls版本，避免'五粮液错误'
+            elif data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx', 'gx_tdx'] and accttype in ['c', 'm']:
+                # 已改为xls版本，避免'五粮液错误'
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].strip().decode('gbk').replace('=', '').replace('"', '').split('\t')
@@ -236,6 +236,19 @@ class DBTradingData:
                             dict_capital_wealthcats = dict(zip(list_keys, list_values))
                             if dict_capital_wealthcats['账户编号'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital_wealthcats)
+
+            elif data_source_type in ['zhaos_xtpb']:
+                # todo 更改路径中的日期
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_capital = dict(zip(list_keys, list_values))
+                            if dict_capital['资金账号'] == acctidbybroker:
+                                dict_rec_capital.update(dict_capital)
             else:
                 raise ValueError('Field data_source_type not exist in basic info!')
             list_ret.append(dict_rec_capital)
@@ -389,6 +402,19 @@ class DBTradingData:
                         if len(list_values) == len(list_keys):
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             if dict_rec_holding['账户编号'] == acctidbybroker:
+                                list_ret.append(dict_rec_holding)
+
+            elif data_source_type in ['zhaos_xtpb']:
+                # todo 更改文件中的路径
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            if dict_rec_holding['资金账号'] == acctidbybroker:
                                 list_ret.append(dict_rec_holding)
 
         elif str_c_h_secliability_mark == 'secliability':
@@ -864,7 +890,8 @@ class DBTradingData:
         """
         wset_astock = w.wset("sectorconstituent", f"date={self.str_today};sectorid=a001010100000000")
         list_str_wcodes_astock = wset_astock.Data[1]
-        list_wcodes_query_patch = ['510500.SH', '000905.SH', '000300.SH', '000016.SH', 'IC2009.CFE']  # todo 可改进
+        # todo 可改进
+        list_wcodes_query_patch = ['510500.SH', '512500.SH', '000905.SH', '000300.SH', '000016.SH', 'IC2009.CFE']
         list_str_wcodes_astock += list_wcodes_query_patch
         str_wcodes_astock = ','.join(list_str_wcodes_astock)
         wss_astock = w.wss(str_wcodes_astock, 'sec_name,close', f'tradeDate={self.str_today};priceAdj=U;cycle=D')
@@ -1022,7 +1049,7 @@ class DBTradingData:
                 return 'CE'
             elif secid[:3] in ['600', '601', '603', '688']:
                 return 'CS'
-            elif secid in ['510500', '000905']:
+            elif secid in ['510500', '000905', '512500']:
                 return 'ETF'
             else:
                 return 'IrrelevantItem'
