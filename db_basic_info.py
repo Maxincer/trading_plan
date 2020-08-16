@@ -13,7 +13,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200806'
+        self.str_today = '20200814'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -47,11 +47,11 @@ class DatabaseBasicInfo:
                                     }
                                     )
         df_acctinfo = df_acctinfo.where(df_acctinfo.notnull(), None)
+        df_acctinfo['DataDate'] = self.str_today
         list_dicts_to_be_inserted = df_acctinfo.to_dict('records')
-        for dict_to_be_inserted in list_dicts_to_be_inserted:
-            dict_to_be_inserted['DataDate'] = self.str_today
         self.col_acctinfo.delete_many({'DataDate': self.str_today})
-        self.col_acctinfo.insert_many(list_dicts_to_be_inserted)
+        for dict_to_be_inserted in list_dicts_to_be_inserted:
+            self.col_acctinfo.insert_one(dict_to_be_inserted)
         print('Collection "acctinfo" has been updated.')
 
     def update_prdinfo(self):

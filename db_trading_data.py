@@ -75,7 +75,9 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
+        self.dt_today = datetime(2020, 8, 14)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
+
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -276,12 +278,12 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-            if data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx'] and accttype in ['c', 'm']:
+            if data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx', 'gx_tdx'] and accttype in ['c', 'm']:
                 # 避免五粮液错误
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     list_list_data = [
-                        dataline.strip().decode('gbk').replace('=', '').replace('"', '').split('\t')
+                        dataline.decode('gbk').replace('=', '').replace('"', '').split('\t')
                         for dataline in list_datalines
                     ]
                     start_index_holding = None
@@ -291,11 +293,14 @@ class DBTradingData:
                     list_keys = list_list_data[start_index_holding]
                     i_list_keys_length = len(list_keys)
                     for list_values in list_list_data[start_index_holding + 1:]:
-                        if len(list_values) == i_list_keys_length:
-                            dict_rec_holding = dict(zip(list_keys, list_values))
-                            list_ret.append(dict_rec_holding)
+                        if '没有' in list_values[0]:
+                            print(f'{acctidbybroker}: {list_values[0]}')
                         else:
-                            print(f'{acctidbybroker}_{data_source_type}_{list_values} not added into database')
+                            if len(list_values) == i_list_keys_length:
+                                dict_rec_holding = dict(zip(list_keys, list_values))
+                                list_ret.append(dict_rec_holding)
+                            else:
+                                print(f'{acctidbybroker}_{data_source_type}_{list_values} not added into database')
 
             elif data_source_type in ['huat_hx', 'yh_hx', 'wk_hx', 'hait_hx',
                                       'zhes_hx', 'db_hx', 'tf_hx'] and accttype in ['c', 'm']:
@@ -473,7 +478,10 @@ class DBTradingData:
                     elif ch == 'secliability':
                         if len(list_fpath_data) > 2:
                             fpath_relative = list_fpath_data[2]
-                            col_manually_rawdata = col_manually_rawdata_secliability
+                            if fpath_relative:
+                                col_manually_rawdata = col_manually_rawdata_secliability
+                            else:
+                                continue
                         else:
                             continue
                     else:
@@ -855,7 +863,6 @@ class DBTradingData:
         4. 计算比例，写入数据库
         5. 将指定比例写入数据库
         """
-        list_dicts_na_allocation_last_trddate = list(self.col_na_allocation.find({'DataDate': self.str_last_trddate}))
 
         list_dicts_prdinfo = list(self.col_prdinfo.find({'DataDate': self.str_today}))
         list_dicts_na_allocation = []
@@ -891,7 +898,8 @@ class DBTradingData:
         wset_astock = w.wset("sectorconstituent", f"date={self.str_today};sectorid=a001010100000000")
         list_str_wcodes_astock = wset_astock.Data[1]
         # todo 可改进
-        list_wcodes_query_patch = ['510500.SH', '512500.SH', '000905.SH', '000300.SH', '000016.SH', 'IC2009.CFE']
+        list_wcodes_query_patch = ['510500.SH', '511660.SH', '512500.SH', '000905.SH', '000300.SH', '000016.SH',
+                                   'IC2009.CFE']
         list_str_wcodes_astock += list_wcodes_query_patch
         str_wcodes_astock = ','.join(list_str_wcodes_astock)
         wss_astock = w.wss(str_wcodes_astock, 'sec_name,close', f'tradeDate={self.str_today};priceAdj=U;cycle=D')
@@ -1185,7 +1193,12 @@ class DBTradingData:
                     sectype = self.get_mingshi_sectype_from_code(windcode)
                     if sectype == 'IrrelevantItem':
                         continue
-                    close = dict_wcode2close[windcode]
+                    if windcode in dict_wcode2close:
+                        close = dict_wcode2close[windcode]
+                    else:
+                        print(f'{windcode} not found in dict_wcode2close.')
+                        close = 0
+
                     longamt = close * longqty
                     shortamt = 0
                     netamt = longamt - shortamt
@@ -1425,7 +1438,7 @@ class DBTradingData:
                 )
                 if dict_capital is None:
                     dict_capital = {}
-                list_fields_af = ['可用', '可用数', '现金资产', '可用金额', '资金可用金', '可用余额', 'T+0指令可用金额']
+                list_fields_af = ['可用', '可用数', '现金资产', '可用金额', '资金可用金', '可用余额', 'T+1指令可用金额']
                 list_fields_ttasset = ['总资产', '资产', '总 资 产', '单元总资产', '账户总资产', '担保资产']
                 flt_ttasset = None
                 flt_cash = None

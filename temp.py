@@ -9,7 +9,7 @@ import pandas as pd
 # solved = solve([x * 1.088 + 26.3 * abs(y) - 60476, x + (y) * 131.6 - 8733], x, y)
 # print(solved)
 
-spot_905 = 6600.85 * 200 /10000
+spot_905 = 6623 * 200 /10000
 print(spot_905)
 na_perlot = spot_905/5
 print(na_perlot)
@@ -41,5 +41,5 @@ print(solved)
 # 929
 x = Symbol('x')
 y = Symbol('y', real=True)
-solved = solve([x * 1.088 + na_perlot * abs(y) - 9430 - 226, x + y * spot_905 - 8988], x, y)
+solved = solve([x * 1.088 + na_perlot * abs(y) - 8445, x + y * spot_905 - 8445], x, y)
 print(solved)

@@ -120,6 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
+        self.str_today = '20200814'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -132,13 +133,15 @@ class GlobalVariable:
         self.col_exposure_analysis_by_acctidbymxz = self.db_trddata['exposure_analysis_by_acctidbymxz']
         self.col_bs_by_acctidbymxz = self.db_trddata['b/s_by_acctidbymxz']
         self.col_future_api_holding = self.db_trddata['future_api_holding']
-        iter_dicts_acctinfo_rpt = self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1})
-        set_prdcodes = set()
-        for dict_acctinfo in iter_dicts_acctinfo_rpt:
-            prdcode = dict_acctinfo['PrdCode']
-            set_prdcodes.add(prdcode)
-        self.list_prdcodes = list(set_prdcodes)
-        self.list_prdcodes.sort()
+        self.fpath_basicinfo = 'data/basic_info.xlsx'
+        df_acctinfo = pd.read_excel(self.fpath_basicinfo, sheet_name='acctinfo', dtype={'PrdCode': str})
+        list_dicts_acctinfo_rpt = df_acctinfo.to_dict('records')
+        self.list_prdcodes = []
+        for dict_acctinfo in list_dicts_acctinfo_rpt:
+            if dict_acctinfo['RptMark']:
+                prdcode = dict_acctinfo['PrdCode']
+                if prdcode not in self.list_prdcodes:
+                    self.list_prdcodes.append(prdcode)
         self.dict_index_future2multiplier = {'IC': 200, 'IF': 300, 'IH': 300}
         self.dict_index_future2spot = {'IC': '000905.SH', 'IF': '000300.SH', 'IH': '000016.SH'}
         self.flt_facct_internal_required_margin_rate = 0.2
@@ -528,8 +531,9 @@ class Product:
             if dict_na_allocation_saccts:
                 list_keys_na_allocation_saccts = list(dict_na_allocation_saccts.keys())
                 list_keys_na_allocation_saccts.sort()
-                list_values_na_allocation_saccts = [dict_na_allocation_saccts[x]
-                                                    for x in list_keys_na_allocation_saccts]
+                list_values_na_allocation_saccts = [
+                    dict_na_allocation_saccts[x] for x in list_keys_na_allocation_saccts
+                ]
 
                 # 注意，此处specified_na 是 分配到渠道对应证券户的净资产，而非渠道的净资产
                 specified_na_in_saccts = 0
@@ -830,12 +834,12 @@ class Product:
                         list_eqs_2b_solved.append(eq_mn_ce_src1)
                         list_eqs_2b_solved.append(eq_mn_ce_src2)
                     else:
-                        eq_ei_cpslongamt_tgt = (ei_cpslongamt_src1
-                                                + ei_cpslongamt_src2
-                                                - self.ei_na_tgt * self.tgt_cpspct)
-                        eq_mn_cpslongamt_tgt = (mn_cpslongamt_src1
-                                                + mn_cpslongamt_src2
-                                                - self.mn_na_tgt * self.tgt_cpspct)
+                        eq_ei_cpslongamt_tgt = (
+                                ei_cpslongamt_src1 + ei_cpslongamt_src2 - self.ei_na_tgt * self.tgt_cpspct
+                        )
+                        eq_mn_cpslongamt_tgt = (
+                                mn_cpslongamt_src1 + mn_cpslongamt_src2 - self.mn_na_tgt * self.tgt_cpspct
+                        )
                         list_eqs_2b_solved.append(eq_ei_cpslongamt_tgt)
                         list_eqs_2b_solved.append(eq_mn_cpslongamt_tgt)
 
@@ -2879,7 +2883,6 @@ class Product:
         list_dicts_bgt_by_acctidbymxz = list(
             self.gv.col_bgt_by_acctidbymxz
                 .find({'DataDate': self.str_today, 'PrdCode': self.prdcode})
-                .sort('AcctIDByMXZ', pymongo.ASCENDING)
         )
         list_str_orders_capital_outflow = []
         list_str_orders_capital_inflow = []
@@ -3053,8 +3056,8 @@ class Product:
             else:
                 pass
 
-        list_dicts_bs_by_acctidbymxz = self.gv.col_bs_by_acctidbymxz.find(
-            {'DataDate': self.str_today, 'PrdCode': self.prdcode}
+        list_dicts_bs_by_acctidbymxz = list(
+            self.gv.col_bs_by_acctidbymxz.find({'DataDate': self.str_today, 'PrdCode': self.prdcode})
         )
         for dict_bs_by_acctidbymxz in list_dicts_bs_by_acctidbymxz:
             acctidbymxz_in_bs = dict_bs_by_acctidbymxz['AcctIDByMXZ']
@@ -3087,7 +3090,7 @@ class Product:
         # 今交易组合计划开始
         # 在内存建立数据表类型条目，记录调整敞口后的各期货账户holding
         list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = []
-        str_order_exposure_adjustment = ''
+        list_order_exposure_adjustment = []
         net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
         iclots_rounded2adjust_exposure_by_prdcode = round(
             net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
@@ -3149,38 +3152,43 @@ class Product:
                         if iclots_in_facct_holding_aggr_by_acctidbymxz * iclots_after_exposure_adjustment >= 0:
                             if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
                                 if iclots_after_exposure_adjustment > 0:
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC多头'
+                                    str_order_exposure_adjustment_delta = (
+                                        f'{str_trdplan_expression}开'
+                                        f'{abs(iclots_rounded2adjust_exposure_after_allocation)}手IC多头'
                                     )
                                 else:
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC空头'
+                                    str_order_exposure_adjustment_delta = (
+                                        f'{str_trdplan_expression}'
+                                        f'平{iclots_rounded2adjust_exposure_after_allocation}手IC空头'
                                     )
                             elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
                                 if iclots_after_exposure_adjustment >= 0:
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}平{abs(iclots_after_exposure_adjustment)}手IC多头'
+                                    str_order_exposure_adjustment_delta = (
+                                        f'{str_trdplan_expression}'
+                                        f'平{abs(iclots_rounded2adjust_exposure_after_allocation)}手IC多头'
                                     )
                                 else:
-                                    str_order_exposure_adjustment = (
-                                        f'{str_trdplan_expression}开{abs(iclots_after_exposure_adjustment)}手IC空头'
+                                    str_order_exposure_adjustment_delta = (
+                                        f'{str_trdplan_expression}'
+                                        f'开{abs(iclots_rounded2adjust_exposure_after_allocation)}手IC空头'
                                     )
                             else:
-                                str_order_exposure_adjustment = ''
+                                str_order_exposure_adjustment_delta = ''
                         else:
                             if iclots_rounded2adjust_exposure_after_allocation < 0:  # Buy
-                                str_order_exposure_adjustment = (
+                                str_order_exposure_adjustment_delta = (
                                     f'{str_trdplan_expression}'
                                     f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC空头，'
                                     f'开{abs(iclots_after_exposure_adjustment)}手IC多头')
                             elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
-                                str_order_exposure_adjustment = (
+                                str_order_exposure_adjustment_delta = (
                                     f'{str_trdplan_expression}'
                                     f'平{abs(iclots_in_facct_holding_aggr_by_acctidbymxz)}手IC多头，'
                                     f'开{abs(iclots_after_exposure_adjustment)}手IC空头')
                             else:
-                                str_order_exposure_adjustment = ''
-                        str_order_exposure_adjustment += str_order_exposure_adjustment
+                                str_order_exposure_adjustment_delta = ''
+                        list_order_exposure_adjustment.append(str_order_exposure_adjustment_delta)
+                    str_order_exposure_adjustment = '，'.join(list_order_exposure_adjustment)
 
                 else:
                     list_dicts_acctinfo_facct = list(
@@ -3362,6 +3370,7 @@ class Product:
                 list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
                     dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
                 )
+            str_order_exposure_adjustment = ''
 
         # 今组合交易计划 - 货基、目标持仓、期指
         list_str_orders_position_saccts = []
@@ -3848,8 +3857,9 @@ class Account(Product):
         # 对IC、IH、IF跨品种双向持仓，按照交易保证金单边较大者收取交易保证金
         margin_rate_in_perfect_shape = 0.2
         margin_rate_warning = 0.16
-        list_dicts_future_api_holding = list(self.gv.col_future_api_holding
-                                             .find({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
+        list_dicts_future_api_holding = list(
+            self.gv.col_future_api_holding.find({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz})
+        )
         margin_required_in_perfect_shape = 0
         margin_warning = 0
         if list_dicts_future_api_holding:
@@ -3864,27 +3874,40 @@ class Account(Product):
                 self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
             df_future_api_holding = pd.DataFrame(list_dicts_future_api_holding)
             df_future_api_holding['index'] = df_future_api_holding['instrument_id'].apply(lambda x: x[:2])
-            df_future_api_holding['multiplier'] = (df_future_api_holding['index']
-                                                   .map(self.gv.dict_index_future2multiplier))
+            df_future_api_holding['multiplier'] = (
+                df_future_api_holding['index'].map(self.gv.dict_index_future2multiplier)
+            )
             df_future_api_holding['windcode'] = df_future_api_holding['instrument_id'] + '.CFE'
-            df_future_api_holding['close'] = (df_future_api_holding['windcode']
-                                              .map(self.gv.dict_index_future_windcode2close))
-            df_future_api_holding['margin_required_in_perfect_shape'] = (df_future_api_holding['position']
-                                                                         * df_future_api_holding['multiplier']
-                                                                         * df_future_api_holding['close']
-                                                                         * margin_rate_in_perfect_shape)
-            df_future_api_holding['margin_warning'] = (df_future_api_holding['position']
-                                                       * df_future_api_holding['multiplier']
-                                                       * df_future_api_holding['close']
-                                                       * margin_rate_warning)
+            df_future_api_holding['close'] = (
+                df_future_api_holding['windcode'].map(self.gv.dict_index_future_windcode2close)
+            )
+            df_future_api_holding['spot_of_index'] = (
+                df_future_api_holding['index'].map(self.gv.dict_index_future2spot)
+            )
+            df_future_api_holding['close_of_spot'] = (
+                df_future_api_holding['spot_of_index'].map(self.gv.dict_index_future_windcode2close)
+            )
+            df_future_api_holding['margin_required_in_perfect_shape'] = (
+                    df_future_api_holding['position']
+                    * df_future_api_holding['multiplier']
+                    * df_future_api_holding['close_of_spot']
+                    * margin_rate_in_perfect_shape
+            )
+            df_future_api_holding['margin_warning'] = (
+                    df_future_api_holding['position']
+                    * df_future_api_holding['multiplier']
+                    * df_future_api_holding['close_of_spot']
+                    * margin_rate_warning
+            )
+
             # 跨品种单向大边保证金制度
-            dicts_future_api_holding_sum_by_direction = (df_future_api_holding
-                                                         .loc[:, ['direction',
-                                                                  'margin_required_in_perfect_shape',
-                                                                  'margin_warning']]
-                                                         .groupby(by='direction')
-                                                         .sum()
-                                                         .to_dict())
+            dicts_future_api_holding_sum_by_direction = (
+                df_future_api_holding
+                .loc[:, ['direction', 'margin_required_in_perfect_shape', 'margin_warning']]
+                .groupby(by='direction')
+                .sum()
+                .to_dict()
+            )
             dict_direction2margin_required_in_perfect_shape = (
                 dicts_future_api_holding_sum_by_direction['margin_required_in_perfect_shape']
             )
@@ -4030,11 +4053,12 @@ class MainFrameWork:
             worksheet_tgtcpsamt.set_column('E:E', 25.5)
             worksheet_tgtcpsamt.set_column('F:F', 12.13)
             worksheet_tgtcpsamt.set_column('F:F', 18.75)
+            worksheet_tgtcpsamt.set_column('G:G', 18.75)
             writer.save()
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            # if prdcode in ['930']:
+            # if prdcode in ['805']:
             prd = Product(self.gv, prdcode)
             prd.budget()
             prd.output_trdplan_order()
