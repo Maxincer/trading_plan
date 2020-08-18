@@ -75,7 +75,7 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        self.dt_today = datetime(2020, 8, 17)
+        # self.dt_today = datetime(2020, 8, 17)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')

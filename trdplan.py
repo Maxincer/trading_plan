@@ -120,7 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200817'
+        # self.str_today = '20200817'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -3965,8 +3965,12 @@ class Account(Product):
         cash_to_composite_long_amt_in_perfect_shape = 0.0889
         cash_in_perfect_shape = composite_long_amt * cash_to_composite_long_amt_in_perfect_shape
         dif_cash = cash - cash_in_perfect_shape
-        pct_cash2trd_by_cpslongamt = round(cash2trd / composite_long_amt, 5)
-        if dif_cash > 3000000 or dif_cash < -50:
+        if composite_long_amt:
+            pct_cash2trd_by_cpslongamt = round(cash2trd / composite_long_amt, 3)
+        else:
+            pct_cash2trd_by_cpslongamt = 999999999
+
+        if dif_cash > 3000000 or pct_cash2trd_by_cpslongamt < 0.05:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -4070,13 +4074,6 @@ class MainFrameWork:
             worksheet_tgtcpsamt.set_column('F:F', 12.13)
             worksheet_tgtcpsamt.set_column('F:F', 18.75)
             worksheet_tgtcpsamt.set_column('G:G', 18.75)
-
-            # # 生成调整事项触发页
-            # list_dicts_items_2b_adjusted = list(
-            #     self.gv.col_items_2b_adjusted.find({'DataDate': self.gv.str_today}, {'_id': 0})
-            # )
-            # for
-
 
             writer.save()
 
