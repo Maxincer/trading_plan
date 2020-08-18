@@ -120,7 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200814'
+        self.str_today = '20200817'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -189,6 +189,7 @@ class GlobalVariable:
         self.list_dicts_broker_info = self.db_basicinfo['broker_info'].find({'DataDate': self.str_today})
         self.col_trdplan_output = self.db_trddata['trdplan_output']
         self.col_tgtcpsamt = self.db_trddata['tgtcpsamt']
+        self.col_items_2b_adjusted = self.db_trddata['items_2b_adjusted']
         self.col_trdplan_expression = self.db_basicinfo['trdplan_expression']
         self.dict_prdcode2special_na_src1 = {'707': 5000000}  # 人工T0处理
         # todo 以下代码需要改进
@@ -3944,20 +3945,35 @@ class Account(Product):
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
     def check_cash_in_c_m_acct(self):
-        dict_bs_by_acctidbymxz = (self.gv.col_bs_by_acctidbymxz
-                                  .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
-        cash = dict_bs_by_acctidbymxz['Cash']
+        dict_bs_by_acctidbymxz = (
+            self.gv.col_bs_by_acctidbymxz.find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz})
+        )
+        acctidbymxz = dict_bs_by_acctidbymxz['AcctIDByMXZ']
+        accttype = acctidbymxz.split('_')[1]
         ce = dict_bs_by_acctidbymxz['CashEquivalent']
+        cash = dict_bs_by_acctidbymxz['Cash']
+        cash_from_ss = dict_bs_by_acctidbymxz['CashFromShortSelling']
+        # todo 待验证假设： 交易资金 = cash - cash_from_ss
+        if accttype in ['c']:
+            cash2trd = cash
+        elif accttype in ['m']:
+            cash2trd = cash + ce - cash_from_ss
+        else:
+            raise ValueError('Unknown accttype.')
+
         composite_long_amt = dict_bs_by_acctidbymxz['CompositeLongAmt']
-        cash_to_composite_long_amt_in_perfect_shape = 0.0889  # EIF perfect shape模型中的现金股票比（比MN少）
+        cash_to_composite_long_amt_in_perfect_shape = 0.0889
         cash_in_perfect_shape = composite_long_amt * cash_to_composite_long_amt_in_perfect_shape
         dif_cash = cash - cash_in_perfect_shape
+        pct_cash2trd_by_cpslongamt = round(cash2trd / composite_long_amt, 5)
         if dif_cash > 3000000 or dif_cash < -50:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
                     'AcctIDByMXZ': self.acctidbymxz,
                     'Cash': cash,
+                    'Cash2Trd': cash2trd,
+                    'PctCash2TrdByCpsLongAmt': pct_cash2trd_by_cpslongamt,
                     'CashInPerfectShape': cash_in_perfect_shape,
                     'CashDif2Perfect': dif_cash,
                     'CE': ce
@@ -3972,12 +3988,9 @@ class MainFrameWork:
 
     def generate_excel(self):
         # 生成交易计划页
-        df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
-        list_dicts_tgtcpsamt = list(
-            self.gv.col_tgtcpsamt.find({'DataDate': self.gv.str_today}, {'_id': 0})
-        )
-        df_tgtcpsamt = pd.DataFrame(list_dicts_tgtcpsamt).T.reset_index().T
         fn_trdplan = f'data/trdplan_auto/trdplan_mxz-{self.gv.str_next_trddate}.xlsx'
+
+        df_trdplan = pd.DataFrame(self.gv.list_dicts_trdplan_output).T.reset_index().T
         with pd.ExcelWriter(fn_trdplan) as writer:
             # 格式化 trdplan 页
             df_trdplan.to_excel(writer, sheet_name='交易计划', index=False, header=False)
@@ -4034,7 +4047,7 @@ class MainFrameWork:
             worksheet_trdplan.set_column('O:O', 5, fmt1)
             worksheet_trdplan.set_column('P:P', 22.13, fmt2)
             worksheet_trdplan.set_column('Q:Q', 12.38, fmt2)
-            worksheet_trdplan.set_column('R:R', 35.88, fmt2)
+            worksheet_trdplan.set_column('R:R', 35.88, fmt1)
             worksheet_trdplan.set_column('A:A', 8.38, fmt_first_col)
             worksheet_trdplan.set_row(0, 31.5, fmt_header)
             worksheet_trdplan.autofilter(0, 0, 0, 17)
@@ -4042,9 +4055,12 @@ class MainFrameWork:
                 worksheet_trdplan.set_row(idx, 80)
 
             # 生成目标持仓页
-            # 字段： PrdCode, AcctIDByMXZ, AcctIDByBroker, AcctIDByXuJie4Trd, AcctIDByXuXiaoQiang4Trd, AdjustedValue
-
+            list_dicts_tgtcpsamt = list(
+                self.gv.col_tgtcpsamt.find({'DataDate': self.gv.str_today}, {'_id': 0})
+            )
+            df_tgtcpsamt = pd.DataFrame(list_dicts_tgtcpsamt).T.reset_index().T
             df_tgtcpsamt.to_excel(writer, sheet_name='目标持仓', index=False, header=False)
+
             worksheet_tgtcpsamt = writer.sheets['目标持仓']
             worksheet_tgtcpsamt.set_column('A:A', 8.88)
             worksheet_tgtcpsamt.set_column('B:B', 18.75)
@@ -4054,6 +4070,14 @@ class MainFrameWork:
             worksheet_tgtcpsamt.set_column('F:F', 12.13)
             worksheet_tgtcpsamt.set_column('F:F', 18.75)
             worksheet_tgtcpsamt.set_column('G:G', 18.75)
+
+            # # 生成调整事项触发页
+            # list_dicts_items_2b_adjusted = list(
+            #     self.gv.col_items_2b_adjusted.find({'DataDate': self.gv.str_today}, {'_id': 0})
+            # )
+            # for
+
+
             writer.save()
 
     def run(self):

@@ -75,9 +75,8 @@ from trader import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        self.dt_today = datetime(2020, 8, 14)
+        self.dt_today = datetime(2020, 8, 17)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
-
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
         self.df_mktdata_from_wind = self.get_close_from_wind()
@@ -1119,6 +1118,9 @@ class DBTradingData:
                 1. 求单账户风险暴露： [c,m,f,o]
                 2. 求单账户持仓状况和资产负债表
                 3. 求单账户现金管理
+        Note：
+            1. 出于业务化简考虑，cash from short selling 字段，在macct中，统一为0,
+            2. 由于oacct融券业务规则未知，故oacct中cash from ss 为None
         todo：
             1. 新股的市值的处理（目前: 找出并删除），需要观察经纪商是如何处理的
             2. 本函数有命名混淆：数据表中的holding包含了空头持仓信息，而实际算法中，holding实际是多头持仓。
@@ -1146,7 +1148,7 @@ class DBTradingData:
                 list_fields_exchange = ['交易市场', '交易板块', '板块', '交易所', '交易所名称']
                 # 有优先级别的列表
                 list_fields_longqty = [
-                    '股票余额', '拥股数量', '证券余额', '库存数量', '证券数量', '持仓数量', '参考持股', '当前持仓',
+                    '股票余额', '拥股数量', '证券余额', '证券数量', '库存数量', '持仓数量', '参考持股', '当前持仓',
                     '当前余额', '实际数量', '实时余额'
                 ]
                 list_dicts_holding_fmtted = []
@@ -1203,6 +1205,13 @@ class DBTradingData:
                     shortamt = 0
                     netamt = longamt - shortamt
 
+                    if accttype in ['c', 'f', 'o']:
+                        cash_from_ss_in_holding_fmtted = None
+                    elif accttype in ['m']:
+                        cash_from_ss_in_holding_fmtted = 0
+                    else:
+                        raise ValueError('Unknown accttype.')
+
                     dict_holding_fmtted = {
                         'DataDate': self.str_today,
                         'AcctIDByMXZ': acctidbymxz,
@@ -1215,7 +1224,7 @@ class DBTradingData:
                         'LongAmt': longamt,
                         'ShortAmt': shortamt,
                         'NetAmt': netamt,
-                        'CashFromShortSelling': 0,
+                        'CashFromShortSelling': cash_from_ss_in_holding_fmtted,
                         'OTCContractUnitMarketValue': None,
                         'LiabilityType': None,
                         'Liability': 0,
@@ -1241,7 +1250,7 @@ class DBTradingData:
                 ))
                 shortqty_from_ss = 0  # 注： 为余额，是未偿还额
                 shortqty_from_equity_compensation = 0  # 注： 是余额
-                cash_from_ss = None
+                cash_from_ss_in_dict_secliability = 0
                 list_fields_shortqty_from_ss = ['剩余数量']
                 list_fields_shortqty_from_equity_compensation = ['权益补偿数量']  # 权益补偿数量，来自于股票分红，zhaos_tdx中该值为余额
                 list_fields_ss_avgprice = ['卖均价']
@@ -1252,7 +1261,6 @@ class DBTradingData:
                     secidsrc = None
                     symbol = None
                     longqty = 0
-                    shortqty = 0
                     for field_secid in list_fields_secid:
                         if field_secid in dict_secliability:
                             secid = str(dict_secliability[field_secid])
@@ -1293,11 +1301,11 @@ class DBTradingData:
                     for field_ss_avgprice in list_fields_ss_avgprice:
                         if field_ss_avgprice in dict_secliability:
                             ss_avgprice = float(dict_secliability[field_ss_avgprice])
-                            cash_from_ss = shortqty_from_ss * ss_avgprice
+                            cash_from_ss_in_dict_secliability = shortqty_from_ss * ss_avgprice
 
                     for field_cash_from_short_selling in list_fields_cash_from_short_selling:
                         if field_cash_from_short_selling in dict_secliability:
-                            cash_from_ss = float(dict_secliability[field_cash_from_short_selling])
+                            cash_from_ss_in_dict_secliability = float(dict_secliability[field_cash_from_short_selling])
 
                     windcode_suffix = {'SZSE': '.SZ', 'SSE': '.SH'}[secidsrc]
                     windcode = secid + windcode_suffix
@@ -1320,7 +1328,7 @@ class DBTradingData:
                         'LongAmt': longamt,
                         'ShortAmt': shortamt,
                         'NetAmt': netamt,
-                        'CashFromShortSelling': cash_from_ss,
+                        'CashFromShortSelling': cash_from_ss_in_dict_secliability,
                         'OTCContractUnitMarketValue': None,
                         'LiabilityType': (lambda x: 'Securities Liability' if x > 0 else None)(shortamt),
                         'Liability': shortamt,
@@ -1351,12 +1359,17 @@ class DBTradingData:
                 list_dicts_holding_patchdata_fmtted = []
 
                 underlying_net_exposure = 0
+                cash_from_ss_in_patch_data = 0
                 if patchmark:
                     list_dicts_holding_patchdata = list(self.db_trddata['manually_patchdata_holding'].find(
                         {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}
                     ))
                     # todo 需改进自定义标的持仓价格和持仓金额的情况（eg.场外非标, 下层基金）
                     for dict_holding_patchdata in list_dicts_holding_patchdata:
+                        if 'CashFromShortSelling' in dict_holding_patchdata:
+                            cash_from_ss_in_patch_data += dict_holding_patchdata['CashFromShortSelling']
+                        else:
+                            cash_from_ss_in_patch_data += 0
                         underlying_sectype = dict_holding_patchdata['UnderlyingSecurityType']
                         if underlying_sectype in ['CS', 'ETF', 'INDEX']:
                             underlying_net_exposure_delta = dict_holding_patchdata['UnderlyingAmt']
@@ -1401,10 +1414,20 @@ class DBTradingData:
                 stock_shortamt = 0
                 etf_shortamt = 0
                 flt_capital_debt = 0
+
+                if accttype in ['c', 'f', 'o']:
+                    cash_from_ss_by_acctidbymxz = None
+                elif accttype in ['m']:
+                    cash_from_ss_by_acctidbymxz = 0
+                    for dict_holding_fmtted_patched in list_dicts_holding_fmtted_patched:
+                        cash_from_ss_by_acctidbymxz += dict_holding_fmtted_patched['CashFromShortSelling']
+                else:
+                    raise ValueError('Unknown accttype.')
+
                 df_holding_fmtted_patched = pd.DataFrame(list_dicts_holding_fmtted_patched)
                 if df_holding_fmtted_patched.empty:
                     df_holding_fmtted_patched = pd.DataFrame(
-                        columns=['DataDate', 'AcctIDByMXZ', 'SecurityID', 'SecurityType', 'Symbol', 'SecurityIDSource',
+                        columns=['DataDate', 'AcctIDByMXZ', 'CashFromSS', 'SecurityID', 'SecurityType',
                                  'Symbol', 'SecurityIDSource',
                                  'LongQty', 'ShortQty', 'LongAmt', 'ShortAmt', 'NetAmt', 'CashFromShortSelling',
                                  'OTCContractUnitMarketValue', 'LiabilityType', 'Liability', 'LiabilityQty',
@@ -1566,6 +1589,7 @@ class DBTradingData:
                     'AcctType': accttype,
                     'Cash': flt_cash,
                     'CashEquivalent': flt_ce,
+                    'CashFromShortSelling': cash_from_ss_by_acctidbymxz,
                     'ETFLongAmt': flt_etf_long_amt,
                     'CompositeLongAmt': flt_composite_long_amt,
                     'AssetFromSwap': flt_swap_amt2asset,
