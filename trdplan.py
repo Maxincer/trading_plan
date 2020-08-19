@@ -120,7 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        # self.str_today = '20200817'
+        self.str_today = '20200818'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -224,7 +224,6 @@ class Product:
         self.prd_ttasset = self.dict_bs_by_prdcode['TotalAsset']
         self.dict_upper_limit_cpspct = {'MN': 0.77, 'EI': 0.9}
         self.list_dicts_bgt_by_acctidbymxz = []
-
         self.dict_tgtna_by_prdcode = self.gv.col_tgtna_by_prdcode.find_one(
             {'DataDate': self.str_today, 'PrdCode': prdcode}
         )
@@ -275,7 +274,8 @@ class Product:
                                              + 0 * self.dict_strategies_allocation['MN'])
         net_exposure_in_perfect_shape = net_exposure_pct_in_perfect_shape * self.prd_approximate_na
         dif_net_exposure2ps = net_exposure - net_exposure_in_perfect_shape
-        if abs(dif_net_exposure2ps) > 1000000:
+        dif_pct_net_exposure = net_exposure_pct - net_exposure_pct_in_perfect_shape
+        if abs(dif_net_exposure2ps) > 15000000 or abs(dif_pct_net_exposure) > 0.04:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -283,7 +283,8 @@ class Product:
                     'NetExposure(%)': net_exposure_pct,
                     'NetExposureInPerfectShape': net_exposure_in_perfect_shape,
                     'NetExposure(%)InPerfectShape': net_exposure_pct_in_perfect_shape,
-                    'NetExposureDif2PS': dif_net_exposure2ps
+                    'DifNetExposure2PS': dif_net_exposure2ps,
+                    'DifNetExposure(%)': dif_pct_net_exposure
                 }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
@@ -3970,7 +3971,7 @@ class Account(Product):
         else:
             pct_cash2trd_by_cpslongamt = 999999999
 
-        if dif_cash > 3000000 or pct_cash2trd_by_cpslongamt < 0.05:
+        if dif_cash > 10000000 and pct_cash2trd_by_cpslongamt > 0.15 or pct_cash2trd_by_cpslongamt < 0.05 and cash < 1000000:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -4074,7 +4075,6 @@ class MainFrameWork:
             worksheet_tgtcpsamt.set_column('F:F', 12.13)
             worksheet_tgtcpsamt.set_column('F:F', 18.75)
             worksheet_tgtcpsamt.set_column('G:G', 18.75)
-
             writer.save()
 
     def run(self):
