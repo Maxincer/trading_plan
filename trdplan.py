@@ -120,7 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200818'
+        self.str_today = '20200819'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -3161,7 +3161,7 @@ class Product:
                                 else:
                                     str_order_exposure_adjustment_delta = (
                                         f'{str_trdplan_expression}'
-                                        f'平{iclots_rounded2adjust_exposure_after_allocation}手IC空头'
+                                        f'平{abs(iclots_rounded2adjust_exposure_after_allocation)}手IC空头'
                                     )
                             elif iclots_rounded2adjust_exposure_after_allocation > 0:  # Sell
                                 if iclots_after_exposure_adjustment >= 0:
@@ -3929,8 +3929,9 @@ class Account(Product):
             margin_warning_by_short = dict_direction2margin_warning['short']
             margin_warning = max(margin_warning_by_long, margin_warning_by_short)
 
-        dict_bs_by_acctidbymxz = (self.gv.col_bs_by_acctidbymxz
-                                  .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz}))
+        dict_bs_by_acctidbymxz = (
+            self.gv.col_bs_by_acctidbymxz.find_one({'DataDate': self.str_today, 'AcctIDByMXZ': self.acctidbymxz})
+        )
         approximate_na = dict_bs_by_acctidbymxz['ApproximateNetAsset']
         dif_margin_warning = approximate_na - margin_warning
         dif_margin_required_in_perfect_shape_approximate_na = approximate_na - margin_required_in_perfect_shape
@@ -4079,14 +4080,14 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            # if prdcode in ['805']:
-            prd = Product(self.gv, prdcode)
-            prd.budget()
-            prd.output_trdplan_order()
-            prd.output_tgtcpsamt()
-            prd.check_exception()
-            prd.check_exposure()
-            print(f'{prdcode} trdplan finished.')
+            if prdcode in ['918']:
+                prd = Product(self.gv, prdcode)
+                prd.budget()
+                prd.output_trdplan_order()
+                prd.output_tgtcpsamt()
+                prd.check_exception()
+                prd.check_exposure()
+                print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

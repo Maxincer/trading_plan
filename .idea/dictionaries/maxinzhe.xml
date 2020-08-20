@@ -4,6 +4,7 @@
       <w>acctid</w>
       <w>acctidbybroker</w>
       <w>acctidbymxz</w>
+      <w>acctidbyowj</w>
       <w>acctidbyxj</w>
       <w>acctidbyxujie</w>
       <w>acctidbyxxq</w>
@@ -63,6 +64,7 @@
       <w>dwitemsid</w>
       <w>dwshares</w>
       <w>dwtype</w>
+      <w>dynamicbalance</w>
       <w>ehtc</w>
       <w>etflongamt</w>
       <w>etfshortamt</w>
@@ -115,6 +117,7 @@
       <w>prdna</w>
       <w>prdname</w>
       <w>productid</w>
+      <w>productname</w>
       <w>pstaggr</w>
       <w>qtyamt</w>
       <w>rawdata</w>
@@ -162,6 +165,7 @@
       <w>trddate</w>
       <w>trdplan</w>
       <w>trdrec</w>
+      <w>trdrecs</w>
       <w>trplan</w>
       <w>ttasset</w>
       <w>ttliability</w>
@@ -174,6 +178,7 @@
       <w>underlyingsecsrc</w>
       <w>unknow</w>
       <w>vecqty</w>
+      <w>wang</w>
       <w>wcode</w>
       <w>wcodes</w>
       <w>wealthcats</w>

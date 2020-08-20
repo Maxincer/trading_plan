@@ -69,7 +69,8 @@ import pymongo
 from WindPy import *
 from xlrd import open_workbook
 
-from trader import Trader
+# from trader import Trader
+from trader_v1 import Trader
 
 
 class DBTradingData:
@@ -499,6 +500,58 @@ class DBTradingData:
                         col_manually_rawdata.insert_many(list_dicts_rec)
         print('Update raw data finished.')
 
+    # def update_trddata_f(self):
+    #     cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'RptMark': 1}))
+    #     for _ in cursor_find:
+    #         list_future_data_capital = []
+    #         list_future_data_holding = []
+    #         list_future_data_trdrec = []
+    #         prdcode = _['PrdCode']
+    #         acctidbymxz = _['AcctIDByMXZ']
+    #         acctidbyowj = _['AcctIDByOuWangJiang4FTrd']
+    #         acctidbybroker = _['AcctIDByBroker']
+    #         trader = Trader(acctidbyowj)
+    #         dict_res_capital = trader.query_account()
+    #         if dict_res_capital['success']:
+    #             dict_capital_to_be_update = dict_res_capital['list'][0]
+    #             dict_capital_to_be_update['DataDate'] = self.str_today
+    #             dict_capital_to_be_update['AcctIDByMXZ'] = acctidbymxz
+    #             dict_capital_to_be_update['PrdCode'] = prdcode
+    #             list_future_data_capital.append(dict_capital_to_be_update)
+    #             self.db_trddata['future_api_capital'].delete_many({'DataDate': self.str_today,
+    #                                                                'AcctIDByMXZ': acctidbymxz})
+    #             if list_future_data_capital:
+    #                 self.db_trddata['future_api_capital'].insert_many(list_future_data_capital)
+    #
+    #         dict_res_holding = trader.query_holding()
+    #         if dict_res_holding['success']:
+    #             list_dicts_holding_to_be_update = dict_res_holding['list']
+    #             for dict_holding_to_be_update in list_dicts_holding_to_be_update:
+    #                 dict_holding_to_be_update['DataDate'] = self.str_today
+    #                 dict_holding_to_be_update['AcctIDByMXZ'] = acctidbymxz
+    #                 dict_holding_to_be_update['PrdCode'] = prdcode
+    #                 list_future_data_holding.append(dict_holding_to_be_update)
+    #
+    #             self.db_trddata['future_api_holding'].delete_many({'DataDate': self.str_today,
+    #                                                                'AcctIDByMXZ': acctidbymxz})
+    #             if list_future_data_holding:
+    #                 self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
+    #         # todo 可用线程搞定
+    #         sleep(1)
+    #         dict_res_trdrec = trader.query_trading()
+    #         if dict_res_trdrec['success']:
+    #             list_dicts_trdrec = dict_res_trdrec['list']
+    #             for dict_trdrec in list_dicts_trdrec:
+    #                 dict_trdrec['DataDate'] = self.str_today
+    #                 dict_trdrec['AcctIDByMXZ'] = acctidbymxz
+    #                 dict_trdrec['PrdCode'] = prdcode
+    #                 list_future_data_trdrec.append(dict_trdrec)
+    #             self.db_trddata['future_api_trdrec'].delete_many({'DataDate': self.str_today,
+    #                                                               'AcctIDByMXZ': acctidbymxz})
+    #             if list_future_data_trdrec:
+    #                 self.db_trddata['future_api_trdrec'].insert_many(list_future_data_trdrec)
+    #         print(f'{acctidbymxz} update finished!')
+
     def update_trddata_f(self):
         cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'RptMark': 1}))
         for _ in cursor_find:
@@ -507,26 +560,34 @@ class DBTradingData:
             list_future_data_trdrec = []
             prdcode = _['PrdCode']
             acctidbymxz = _['AcctIDByMXZ']
-            acctidbybroker = _['AcctIDByBroker']
-            trader = Trader(acctidbybroker)
-            dict_res_capital = trader.query_account()
-            if dict_res_capital['success']:
-                dict_capital_to_be_update = dict_res_capital['list'][0]
+            acctidbyowj = _['AcctIDByOuWangJiang4FTrd']
+            trader = Trader(acctidbyowj)
+            dict_res_capital = trader.query_capital()
+            if dict_res_capital:
+                dict_capital_to_be_update = dict_res_capital
                 dict_capital_to_be_update['DataDate'] = self.str_today
                 dict_capital_to_be_update['AcctIDByMXZ'] = acctidbymxz
+                dict_capital_to_be_update['AcctIDByOWJ'] = acctidbyowj
                 dict_capital_to_be_update['PrdCode'] = prdcode
                 list_future_data_capital.append(dict_capital_to_be_update)
-                self.db_trddata['future_api_capital'].delete_many({'DataDate': self.str_today,
-                                                                   'AcctIDByMXZ': acctidbymxz})
+                self.db_trddata['future_api_capital'].delete_many(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
                 if list_future_data_capital:
                     self.db_trddata['future_api_capital'].insert_many(list_future_data_capital)
 
-            dict_res_holding = trader.query_holding()
-            if dict_res_holding['success']:
-                list_dicts_holding_to_be_update = dict_res_holding['list']
-                for dict_holding_to_be_update in list_dicts_holding_to_be_update:
+            list_list_res_holding = trader.query_holding()
+            list_keys_holding = [
+                'exchange', 'instrument_id', 'direction', 'hedge', 'position', 'position_td', 'open_volume',
+                'close_volume', 'unknown1', 'unknown2', 'unknown3'
+            ]
+            if len(list_list_res_holding):
+                list_dicts_holding_to_be_update = list_list_res_holding
+                for list_holding_to_be_update in list_dicts_holding_to_be_update:
+                    dict_holding_to_be_update = dict(zip(list_keys_holding, list_holding_to_be_update))
                     dict_holding_to_be_update['DataDate'] = self.str_today
                     dict_holding_to_be_update['AcctIDByMXZ'] = acctidbymxz
+                    dict_holding_to_be_update['AcctIDByOWJ'] = acctidbyowj
                     dict_holding_to_be_update['PrdCode'] = prdcode
                     list_future_data_holding.append(dict_holding_to_be_update)
 
@@ -534,18 +595,20 @@ class DBTradingData:
                                                                    'AcctIDByMXZ': acctidbymxz})
                 if list_future_data_holding:
                     self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
-            # todo 可用线程搞定
-            sleep(1)
-            dict_res_trdrec = trader.query_trading()
-            if dict_res_trdrec['success']:
-                list_dicts_trdrec = dict_res_trdrec['list']
-                for dict_trdrec in list_dicts_trdrec:
+
+            list_list_res_trdrecs = trader.query_trdrecs()
+            if len(list_list_res_trdrecs):
+                list_keys_trdrecs = ['instrument_id', 'direction', 'offset', 'volume', 'price', 'time', 'trader']
+                for list_res_trdrecs in list_list_res_trdrecs:
+                    dict_trdrec = dict(zip(list_keys_trdrecs, list_res_trdrecs))
                     dict_trdrec['DataDate'] = self.str_today
                     dict_trdrec['AcctIDByMXZ'] = acctidbymxz
+                    dict_trdrec['AcctIDByOWJ'] = acctidbyowj
                     dict_trdrec['PrdCode'] = prdcode
                     list_future_data_trdrec.append(dict_trdrec)
-                self.db_trddata['future_api_trdrec'].delete_many({'DataDate': self.str_today,
-                                                                  'AcctIDByMXZ': acctidbymxz})
+                self.db_trddata['future_api_trdrec'].delete_many(
+                    {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                )
                 if list_future_data_trdrec:
                     self.db_trddata['future_api_trdrec'].insert_many(list_future_data_trdrec)
             print(f'{acctidbymxz} update finished!')
@@ -1662,12 +1725,7 @@ class DBTradingData:
                     exposure_net_amt = 0
                 dict_capital_future = (self.db_trddata['future_api_capital']
                                        .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}))
-                flt_approximate_na = (dict_capital_future['pre_balance']
-                                      + dict_capital_future['deposit']
-                                      - dict_capital_future['withdraw']
-                                      + dict_capital_future['close_profit']
-                                      + dict_capital_future['position_profit']
-                                      - dict_capital_future['commission'])
+                flt_approximate_na = dict_capital_future['DYNAMICBALANCE']
                 dict_future_bs = {
                     'DataDate': self.str_today,
                     'AcctIDByMXZ': acctidbymxz,
@@ -1708,8 +1766,9 @@ class DBTradingData:
         print('Update capital and holding formatted by internal style finished.')
 
     def update_bs_by_prdcode_and_exposure_analysis_by_prdcode(self):
-        list_dicts_bs_by_acct = list(self.db_trddata['b/s_by_acctidbymxz']
-                                     .find({'DataDate': self.str_today}, {'_id': 0}))
+        list_dicts_bs_by_acct = list(
+            self.db_trddata['b/s_by_acctidbymxz'].find({'DataDate': self.str_today}, {'_id': 0})
+        )
         df_bs_by_acct = pd.DataFrame(list_dicts_bs_by_acct)
         df_bs_by_prdcode = df_bs_by_acct.groupby(by='PrdCode').sum().reset_index()
         df_bs_by_prdcode['DataDate'] = self.str_today
@@ -1717,14 +1776,15 @@ class DBTradingData:
         self.db_trddata['b/s_by_prdcode'].delete_many({'DataDate': self.str_today})
         if list_dicts_bs_by_prdcode:
             self.db_trddata['b/s_by_prdcode'].insert_many(list_dicts_bs_by_prdcode)
-
-        list_dicts_exposure_analysis_by_acctidbymxz = list(self.db_trddata['exposure_analysis_by_acctidbymxz']
-                                                           .find({'DataDate': self.str_today}, {'_id': 0}))
+        list_dicts_exposure_analysis_by_acctidbymxz = list(
+            self.db_trddata['exposure_analysis_by_acctidbymxz'].find({'DataDate': self.str_today}, {'_id': 0})
+        )
         df_exposure_analysis_by_acctidbymxz = pd.DataFrame(list_dicts_exposure_analysis_by_acctidbymxz)
         df_exposure_analysis_by_prdcode = df_exposure_analysis_by_acctidbymxz.groupby(by='PrdCode').sum().reset_index()
         df_exposure_analysis_by_prdcode['DataDate'] = self.str_today
-        df_exposure_analysis_by_prdcode['NetExposure(%)'] = (df_exposure_analysis_by_prdcode['NetExposure']
-                                                             / df_exposure_analysis_by_prdcode['ApproximateNetAsset'])
+        df_exposure_analysis_by_prdcode['NetExposure(%)'] = (
+                df_exposure_analysis_by_prdcode['NetExposure'] / df_exposure_analysis_by_prdcode['ApproximateNetAsset']
+        )
         list_dicts_exposure_analysis_by_prdcode = df_exposure_analysis_by_prdcode.to_dict('records')
         for dict_exposure_analysis_by_prdcode in list_dicts_exposure_analysis_by_prdcode:
             prdcode = dict_exposure_analysis_by_prdcode['PrdCode']

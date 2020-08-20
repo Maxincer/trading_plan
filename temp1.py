@@ -1,6 +1,6 @@
 # coding: utf8
 
 import pandas as pd
-fpath_ax = '//192.168.2.149/ax_auto_export_data/普通账户持仓20200811.csv'
-df_temp = pd.read_csv(fpath_ax, encoding='ansi')
+fpath_ax = r'D:\data\A_trading_data\A_result\702hao\holding.xlsx'
+df_temp = pd.read_excel(fpath_ax, encoding='utf-8', skiprows=3, dtype={'证券代码': str})
 print(df_temp)

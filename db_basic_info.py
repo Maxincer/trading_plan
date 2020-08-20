@@ -13,7 +13,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        self.str_today = '20200818'
+        # self.str_today = '20200818'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -32,6 +32,7 @@ class DatabaseBasicInfo:
                                     dtype={
                                         'AcctIDByBroker': str,
                                         'AcctIDByMXZ': str,
+                                        'AcctIDByOuWangJiang4FTrd'
                                         'AcctIDByXuJie4Trd': str,
                                         'AcctIDByXuXiaoQiang4Trd': str,
                                         'AcctStatus': str,

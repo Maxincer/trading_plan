@@ -1,95 +1,74 @@
-# coding=gbk
+# coding: utf-8
+
 import zmq
 import json
 import configparser
-import threading
 import telnetlib
 
 
-class Trader(threading.Thread):
-
-    socket = None
-
-    # ¶ÁÈ¡ÅäÖÃÎÄ¼ş
-    config = configparser.ConfigParser()
-    config.read("config.ini")
-
-    # ³õÊ¼»¯·½·¨
-    # parameter:
-    #   product_id  ²úÆ·ID
-    #   user_id    ÓÃ»§ID
-    def __init__(self, product_id, user_id):
-        super(Trader, self).__init__()
-        self.user_id = str(user_id)
+class Trader:
+    def __init__(self, product_id):
+        """
+        :param product_id: FAcctIDByOWJ
+        """
+        self.user_id = 'MXZ'
         self.product_id = str(product_id)
-        self.trade_address = self.config.get("base_in_if_custom_v1.0", "trade_address")
-        self.trade_port = self.config.get("base_in_if_custom_v1.0", "trade_port")
+        self.config = configparser.ConfigParser()
+        self.config.read("config.ini")
+        self.query_address = self.config.get("query", "query_address")
+        self.query_port = self.config.get("query", "query_port")
         try:
-            telnetlib.Telnet(self.trade_address, port=self.trade_port, timeout=10)
+            telnetlib.Telnet(self.query_address, port=self.query_port, timeout=10)
         except BaseException as e:
-            raise Exception(u"²âÁ¬ %s:%s Á¬½Ó²»Í¨£¬ÇëÁªÏµ¹ÜÀíÔ±¡£" % (self.trade_address, self.trade_port))
-
+            raise Exception(f"æµ‹è¿{self.query_address}:{self.query_port} è¿æ¥ä¸é€šï¼Œè¯·è”ç³»ç®¡ç†å‘˜ã€‚")
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect("tcp://%s:%s" % (self.trade_address, self.trade_port))
-
-        recv_message = self.send_message(json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "check"}))
-        if recv_message == "":
-            raise Exception(u"½ÓÊÕ²âÁ¬Êı¾İÎª¿Õ£¡")
-        else:
-            dict_message=json.loads(recv_message, encoding="gb2312")
+        self.socket.connect(f"tcp://{self.query_address}:{self.query_port}")
+        recv_message = self.send_message(
+            json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "check"})
+        )
+        if recv_message:
+            dict_message = json.loads(recv_message, encoding="gbk")
             if "SUCCESS" in dict_message.keys():
                 if dict_message["SUCCESS"]:
                     self.product_name = dict_message["PRODUCTNAME"]
                 else:
-                    raise Exception(u"²âÁ¬ %s²úÆ·Ê§°Ü£º%s£¡" % (self.product_id, dict_message["MSG"]))
+                    raise Exception(f"æµ‹è¿{self.product_id}äº§å“å¤±è´¥ï¼š{dict_message['MSG']}ï¼")
             else:
-                raise Exception(u"½ÓÊÕ²âÁ¬Êı¾İ¸ñÊ½´íÎó£¡")
-
-    def __del__(self):
-        pass
-
-    # Ïò·şÎñÆ÷·¢ËÍÏûÏ¢
-    # ²ÎÊı£º
-    # message ÏûÏ¢ÄÚÈİ
-    # return
-    #   ·µ»Ø·şÎñÆ÷´¦Àí½á¹û£¬Èç¹û·şÎñÆ÷·µ»ØÎª¿Õ»òsuccessÎªfalse£¬Ôò·µ»ØNone
+                raise Exception("æ¥æ”¶æµ‹è¿æ•°æ®æ ¼å¼é”™è¯¯ï¼")
+        else:
+            raise Exception("æ¥æ”¶æµ‹è¿æ•°æ®ä¸ºç©ºï¼")
 
     def send_message(self, message):
         self.socket.send_string(message)
-        return self.socket.recv_string()
+        ret_msg = self.socket.recv_string()
+        return ret_msg
 
-    # ²éÑ¯·şÎñÆ÷¶©µ¥½»Ò×
-    def submit_query_order(self, orders):
-        recv_message = self.send_message(
-            json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "order", "LIST": orders})
-        )
-        if len(recv_message) == 0:
-            raise Exception(u"Î´½ÓÊÕµ½²úÆ·³Ö²ÖÊı¾İ£¡")
-        else:
-            return json.loads(recv_message, encoding="utf-8")
-
-    # ²éÑ¯·şÎñÆ÷²úÆ·³Ö²Ö
-    def query_local_holding(self):
+    def query_holding(self):
         recv_message = self.send_message(
             json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "holding"})
         )
-        if len(recv_message) == 0:
-            raise Exception(u"Î´½ÓÊÕµ½²úÆ·³Ö²ÖÊı¾İ£¡")
-        else:
+        if len(recv_message):
             return json.loads(recv_message, encoding="utf-8")
+        else:
+            raise Exception("æœªæ¥æ”¶åˆ°äº§å“æŒä»“æ•°æ®ï¼")
 
-    # ²éÑ¯·şÎñÆ÷²úÆ·×Ê½ğ
-    def query_local_capital(self):
+    def query_trdrecs(self):
         recv_message = self.send_message(
-            json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "capital"}))
-        if len(recv_message) == 0:
-            raise Exception(u"Î´½ÓÊÕµ½²úÆ·³Ö²ÖÊı¾İ£¡")
-        else:
+            json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "traded"})
+        )
+        if len(recv_message):
             return json.loads(recv_message, encoding="utf-8")
+        else:
+            raise Exception("æœªæ¥æ”¶åˆ°äº§å“æˆäº¤è®¢å•æ•°æ®ï¼")
+
+    def query_capital(self):
+        recv_message = self.send_message(
+            json.dumps({"PRODUCTID": self.product_id, "USERID": self.user_id, "VERB": "account"})
+        )
+        if len(recv_message):
+            return json.loads(recv_message, encoding="utf-8")
+        else:
+            raise Exception("æœªæ¥æ”¶åˆ°äº§å“èµ„é‡‘æƒ…å†µæ•°æ®ï¼")
 
 
-if __name__ == '__main__':
-    a = Trader('simnow4', 'MXZ')
-    ret = a.query_local_capital()
-    print(ret)
