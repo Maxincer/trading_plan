@@ -61,7 +61,6 @@ Abbr.:
 
 import codecs
 import os
-from time import sleep
 
 from openpyxl import load_workbook
 import pandas as pd
@@ -69,14 +68,13 @@ import pymongo
 from WindPy import *
 from xlrd import open_workbook
 
-# from trader import Trader
 from trader_v1 import Trader
 
 
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        # self.dt_today = datetime(2020, 8, 17)
+        # self.dt_today = datetime(2020, 8, 21)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
@@ -152,6 +150,10 @@ class DBTradingData:
                     list_values = list_datalines[6].decode('gbk').split()
                     dict_rec_capital.update(dict(zip(list_keys, list_values)))
 
+            elif data_source_type in ['yh_datagrp']:
+                df_read = pd.read_excel(fpath, nrows=2)
+                dict_rec_capital = df_read.to_dict('records')[0]
+
             elif data_source_type in ['huat_hx', 'hait_hx', 'wk_hx'] and accttype == 'm':
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()[5:14]
@@ -178,9 +180,13 @@ class DBTradingData:
                 df_read = pd.read_excel(fpath, skiprows=1, nrows=1)
                 dict_rec_capital = df_read.to_dict('records')[0]
 
+            elif data_source_type in ['hait_datagrp']:
+                df_read = pd.read_excel(fpath, nrows=2)
+                dict_rec_capital = df_read.to_dict('records')[0]
+
             elif data_source_type in ['xc_tdx', 'zx_tdx', 'ms_tdx'] and accttype in ['c', 'm']:
                 # todo 存在五粮液错误
-                 with open(fpath, 'rb') as f:
+                with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     dataline = list_datalines[0][8:]
                     list_recdata = dataline.strip().decode('gbk').split()
@@ -278,7 +284,7 @@ class DBTradingData:
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
 
-            if data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx', 'gx_tdx'] and accttype in ['c', 'm']:
+            elif data_source_type in ['wk_tdx', 'zhaos_tdx', 'huat_tdx', 'hf_tdx', 'gx_tdx'] and accttype in ['c', 'm']:
                 # 避免五粮液错误
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
@@ -324,6 +330,16 @@ class DBTradingData:
                             list_values = [x.decode('gbk') for x in list_data]
                             dict_rec_holding = dict(zip(list_keys, list_values))
                             list_ret.append(dict_rec_holding)
+
+            elif data_source_type in ['hait_datagrp', 'yh_datagrp']:
+                df_read = pd.read_excel(
+                    fpath,
+                    skiprows=3,
+                    dtype={'股东代码': str},
+                    converters={'代码': lambda x: str(x).zfill(6), '证券代码': lambda x: str(x).zfill(6)}
+                )
+                list_dicts_rec_holding = df_read.to_dict('records')
+                list_ret = list_dicts_rec_holding
 
             elif data_source_type in ['gtja_fy'] and accttype in ['c', 'm']:
                 wb = open_workbook(fpath, encoding_override='gbk')
@@ -499,58 +515,6 @@ class DBTradingData:
                     if list_dicts_rec:
                         col_manually_rawdata.insert_many(list_dicts_rec)
         print('Update raw data finished.')
-
-    # def update_trddata_f(self):
-    #     cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'RptMark': 1}))
-    #     for _ in cursor_find:
-    #         list_future_data_capital = []
-    #         list_future_data_holding = []
-    #         list_future_data_trdrec = []
-    #         prdcode = _['PrdCode']
-    #         acctidbymxz = _['AcctIDByMXZ']
-    #         acctidbyowj = _['AcctIDByOuWangJiang4FTrd']
-    #         acctidbybroker = _['AcctIDByBroker']
-    #         trader = Trader(acctidbyowj)
-    #         dict_res_capital = trader.query_account()
-    #         if dict_res_capital['success']:
-    #             dict_capital_to_be_update = dict_res_capital['list'][0]
-    #             dict_capital_to_be_update['DataDate'] = self.str_today
-    #             dict_capital_to_be_update['AcctIDByMXZ'] = acctidbymxz
-    #             dict_capital_to_be_update['PrdCode'] = prdcode
-    #             list_future_data_capital.append(dict_capital_to_be_update)
-    #             self.db_trddata['future_api_capital'].delete_many({'DataDate': self.str_today,
-    #                                                                'AcctIDByMXZ': acctidbymxz})
-    #             if list_future_data_capital:
-    #                 self.db_trddata['future_api_capital'].insert_many(list_future_data_capital)
-    #
-    #         dict_res_holding = trader.query_holding()
-    #         if dict_res_holding['success']:
-    #             list_dicts_holding_to_be_update = dict_res_holding['list']
-    #             for dict_holding_to_be_update in list_dicts_holding_to_be_update:
-    #                 dict_holding_to_be_update['DataDate'] = self.str_today
-    #                 dict_holding_to_be_update['AcctIDByMXZ'] = acctidbymxz
-    #                 dict_holding_to_be_update['PrdCode'] = prdcode
-    #                 list_future_data_holding.append(dict_holding_to_be_update)
-    #
-    #             self.db_trddata['future_api_holding'].delete_many({'DataDate': self.str_today,
-    #                                                                'AcctIDByMXZ': acctidbymxz})
-    #             if list_future_data_holding:
-    #                 self.db_trddata['future_api_holding'].insert_many(list_future_data_holding)
-    #         # todo 可用线程搞定
-    #         sleep(1)
-    #         dict_res_trdrec = trader.query_trading()
-    #         if dict_res_trdrec['success']:
-    #             list_dicts_trdrec = dict_res_trdrec['list']
-    #             for dict_trdrec in list_dicts_trdrec:
-    #                 dict_trdrec['DataDate'] = self.str_today
-    #                 dict_trdrec['AcctIDByMXZ'] = acctidbymxz
-    #                 dict_trdrec['PrdCode'] = prdcode
-    #                 list_future_data_trdrec.append(dict_trdrec)
-    #             self.db_trddata['future_api_trdrec'].delete_many({'DataDate': self.str_today,
-    #                                                               'AcctIDByMXZ': acctidbymxz})
-    #             if list_future_data_trdrec:
-    #                 self.db_trddata['future_api_trdrec'].insert_many(list_future_data_trdrec)
-    #         print(f'{acctidbymxz} update finished!')
 
     def update_trddata_f(self):
         cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'RptMark': 1}))
@@ -1208,10 +1172,10 @@ class DBTradingData:
                 list_fields_secid = ['代码', '证券代码']
                 list_fields_symbol = ['证券名称']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
-                list_fields_exchange = ['交易市场', '交易板块', '板块', '交易所', '交易所名称']
+                list_fields_exchange = ['市场', '交易市场', '交易板块', '板块', '交易所', '交易所名称']
                 # 有优先级别的列表
                 list_fields_longqty = [
-                    '股票余额', '拥股数量', '证券余额', '证券数量', '库存数量', '持仓数量', '参考持股', '当前持仓',
+                    '股票余额', '拥股数量', '证券余额', '证券数量', '库存数量', '持仓数量', '参考持股', '持股数量', '当前持仓',
                     '当前余额', '实际数量', '实时余额'
                 ]
                 list_dicts_holding_fmtted = []
@@ -1227,7 +1191,7 @@ class DBTradingData:
 
                     for field_shareholder_acctid in list_fields_shareholder_acctid:
                         if field_shareholder_acctid in dict_holding:
-                            shareholder_acctid = dict_holding[field_shareholder_acctid]
+                            shareholder_acctid = str(dict_holding[field_shareholder_acctid])
                             if shareholder_acctid[0].isalpha():
                                 secidsrc = 'SSE'
                             if shareholder_acctid[0].isdigit():
@@ -1243,6 +1207,7 @@ class DBTradingData:
                                                       '0': 'SZSE', '1': 'SSE',
                                                       '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
                                                       '上海A股': 'SSE', '深圳A股': 'SZSE',
+                                                      'SH': 'SSE', 'SZ': 'SZSE'
                                                       }
                             secidsrc = dict_exchange2secidsrc[exchange]
                     for field_symbol in list_fields_symbol:
@@ -1692,10 +1657,10 @@ class DBTradingData:
                     future_long_amt = 0
                     future_short_amt = 0
 
-                    if direction == 'long':
+                    if direction == 'buy':
                         future_long_qty = qty
                         future_long_amt = close * future_long_qty * self.dict_future2multiplier[secid_first_part]
-                    elif direction == 'short':
+                    elif direction == 'sell':
                         future_short_qty = qty
                         future_short_amt = close * future_short_qty * self.dict_future2multiplier[secid_first_part]
                     else:
@@ -1836,9 +1801,9 @@ class DBTradingData:
                     direction = dict_future_api_holding['direction']
                     position = dict_future_api_holding['position']
                     secid_first_part_in_api_holding = dict_future_api_holding['instrument_id'][:-4]
-                    if direction == 'long':
+                    if direction == 'buy':
                         vecqty_delta = position
-                    elif direction == 'short':
+                    elif direction == 'sell':
                         vecqty_delta = - position
                     else:
                         raise ValueError('Unknown direction.')

@@ -44,8 +44,10 @@
       <w>cpsshortamt</w>
       <w>cpstrd</w>
       <w>cpsttrdstarttime</w>
+      <w>currmargin</w>
       <w>datadate</w>
       <w>datafilepath</w>
+      <w>datagrp</w>
       <w>datainline</w>
       <w>dataline</w>
       <w>datalines</w>
@@ -116,6 +118,7 @@
       <w>prdinfo</w>
       <w>prdna</w>
       <w>prdname</w>
+      <w>prebalance</w>
       <w>productid</w>
       <w>productname</w>
       <w>pstaggr</w>

@@ -27,13 +27,9 @@ class PrintFutureFmttedInfo:
     def get_display_col(self):
         list_dicts_future_api_capital = self.col_future_api_capital.find({'DataDate': self.str_today})
         for dict_future_api_capital in list_dicts_future_api_capital:
-            flt_approximate_na = (dict_future_api_capital['pre_balance']
-                                  + dict_future_api_capital['deposit']
-                                  - dict_future_api_capital['withdraw']
-                                  + dict_future_api_capital['close_profit']
-                                  + dict_future_api_capital['position_profit']
-                                  - dict_future_api_capital['commission'])
-            flt_curr_margin = dict_future_api_capital['curr_margin']
+            flt_approximate_na = dict_future_api_capital['DYNAMICBALANCE']
+            flt_curr_margin = dict_future_api_capital['CURRMARGIN']
+            acctidbyowj = dict_future_api_capital['AcctIDByOWJ']
             if flt_approximate_na == 0:
                 curr_margin_rate = 'Net Asset Equals to 0.'
             else:
@@ -41,10 +37,11 @@ class PrintFutureFmttedInfo:
             dict_display_capital = {
                 'DataDateTime': self.str_now,
                 'AcctIDByMXZ': dict_future_api_capital['AcctIDByMXZ'],
+                'AcctIDByOWJ': acctidbyowj,
                 'PrdCode': dict_future_api_capital['PrdCode'],
-                'PreBalance': dict_future_api_capital['pre_balance'],
-                'Deposit': dict_future_api_capital['deposit'],
-                'Withdraw': dict_future_api_capital['withdraw'],
+                'PreBalance': dict_future_api_capital['PREBALANCE'],
+                'Deposit': dict_future_api_capital['DEPOSIT'],
+                'Withdraw': dict_future_api_capital['WITHDRAW'],
                 'NetAsset': flt_approximate_na,
                 'CurrentMarginRate': curr_margin_rate,
             }
@@ -55,9 +52,11 @@ class PrintFutureFmttedInfo:
             secid = dict_future_api_holding['instrument_id']
             direction = dict_future_api_holding['direction']
             qty = dict_future_api_holding['position']
+
             dict_display_holding = {
                 'DataDateTime': self.str_now,
                 'AcctIDByMXZ': dict_future_api_holding['AcctIDByMXZ'],
+                'AcctIDByOWJ': dict_future_api_holding['AcctIDByOWJ'],
                 'PrdCode': dict_future_api_holding['PrdCode'],
                 'SecurityID': secid,
                 'Direction': direction,
@@ -72,7 +71,7 @@ class PrintFutureFmttedInfo:
             for dict_future_api_trdrec in list_dicts_future_api_trdrec:
                 secid = dict_future_api_trdrec['instrument_id']
                 direction = dict_future_api_trdrec['direction']
-                time = dict_future_api_trdrec['time']
+                time = dict_future_api_trdrec['time'].split(' ')[1]
                 volume = dict_future_api_trdrec['volume']
                 price = dict_future_api_trdrec['price']
                 offset = dict_future_api_trdrec['offset']
@@ -117,22 +116,24 @@ class PrintFutureFmttedInfo:
             df_trdrec_details.to_excel(writer, sheet_name='trdrec_details', index=False)
             worksheet_capital = writer.sheets['capital']
             worksheet_capital.set_column('A:B', 17.75)
-            worksheet_capital.set_column('C:C', 9)
-            worksheet_capital.set_column('D:D', 12.63)
-            worksheet_capital.set_column('E:E', 9)
-            worksheet_capital.set_column('F:F', 10.13)
-            worksheet_capital.set_column('G:G', 12.13)
-            worksheet_capital.set_column('H:H', 24.38)
+            worksheet_capital.set_column('C:C', 13.88)
+            worksheet_capital.set_column('D:D', 9)
+            worksheet_capital.set_column('E:E', 12.63)
+            worksheet_capital.set_column('F:F', 9)
+            worksheet_capital.set_column('G:G', 10.13)
+            worksheet_capital.set_column('H:H', 12.13)
+            worksheet_capital.set_column('I:I', 24.38)
             worksheet_holding = writer.sheets['holding']
             worksheet_holding.set_column('A:B', 17.75)
-            worksheet_holding.set_column('C:C', 9)
-            worksheet_holding.set_column('D:E', 12.63)
-            worksheet_holding.set_column('F:F', 5)
+            worksheet_holding.set_column('C:C', 13.88)
+            worksheet_holding.set_column('D:D', 9)
+            worksheet_holding.set_column('E:F', 12.63)
+            worksheet_holding.set_column('G:G', 5)
             worksheet_trdrec_aggr = writer.sheets['trdrec_aggr']
             worksheet_trdrec_aggr.set_column('A:B', 17.75)
             worksheet_trdrec_aggr.set_column('C:C', 9)
             worksheet_trdrec_aggr.set_column('D:D', 12.63)
-            worksheet_trdrec_aggr.set_column('E:E', 5)
+            worksheet_trdrec_aggr.set_column('E:E', 7.88)
             worksheet_trdrec_details = writer.sheets['trdrec_details']
             worksheet_trdrec_details.set_column('A:B', 17.75)
             worksheet_trdrec_details.set_column('C:C', 9)

@@ -34,7 +34,7 @@
     　　       2、甲方信用账户资产总值、负债总额、保证金可用余额与可提取金额、担保证券市值、维持担保比例；
     　　       3、每笔融资利息与融券费用、偿还期限，融资买入和融券卖出的成交价格、数量、金额。
         8. 《上海证券交易所融资融券交易实施细则》第四十二条，维持担保比例是指客户担保物价值与其融资融券债务之间的比例，计算公式为：
-            维持担保比例=（现金+信用证券账户内证券市值总和+其他担保物价值）/（融资买入金额+融券卖出证券数量×当前市价＋利息及费用总和）。
+            维持担保比例=（现金+信用证券账户内证券市值总和+其他担保M物价值）/（融资买入金额+融券卖出证券数量×当前市价＋利息及费用总和）。
             注：新修订的“细则”（2019年修订）取消了最低维持担保比例不得低于130%的规定。原为130% 补至160%
         9. 《上海证券交易所融资融券交易实施细则》第四十条，投资者融资买入或融券卖出时所使用的保证金不得超过其保证金可用余额。
             保证金可用余额是指投资者用于充抵保证金的现金、证券市值及融资融券交易产生的浮盈经折算后形成的保证金总额，减去投资者未了结融资融券交易
@@ -120,7 +120,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        self.str_today = '20200819'
+        # self.str_today = '20200821'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -1203,6 +1203,7 @@ class Product:
                     # 如有信用户，则该渠道按照最少净资产原则放在信用户里交易
                     dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'AcctType': 'm',
                             'RptMark': 1,
@@ -2814,7 +2815,7 @@ class Product:
             else:
                 margin_maintenance_ratio = 999999999
             if margin_maintenance_ratio <= 1.5:
-                print(f'Warning, margin maintenance ratio {margin_maintenance_ratio}, may be not sufficient.')
+                print(f'Warning: {dict_macct_basicinfo["AcctIDByMXZ"]} margin maintenance ratio {margin_maintenance_ratio}, may be not sufficient.')
 
             cpslongamt_in_macct_src1 = cpslongamt_src1
             cash_available_in_macct_src1 = cpslongamt_src1 * self.gv.flt_cash2cpslongamt
@@ -3914,19 +3915,19 @@ class Account(Product):
                 dicts_future_api_holding_sum_by_direction['margin_required_in_perfect_shape']
             )
             dict_direction2margin_warning = dicts_future_api_holding_sum_by_direction['margin_warning']
-            if 'long' not in dict_direction2margin_required_in_perfect_shape:
-                dict_direction2margin_required_in_perfect_shape['long'] = 0
-                dict_direction2margin_warning['long'] = 0
-            if 'short' not in dict_direction2margin_required_in_perfect_shape:
-                dict_direction2margin_required_in_perfect_shape['short'] = 0
-                dict_direction2margin_warning['short'] = 0
+            if 'buy' not in dict_direction2margin_required_in_perfect_shape:
+                dict_direction2margin_required_in_perfect_shape['buy'] = 0
+                dict_direction2margin_warning['buy'] = 0
+            if 'sell' not in dict_direction2margin_required_in_perfect_shape:
+                dict_direction2margin_required_in_perfect_shape['sell'] = 0
+                dict_direction2margin_warning['sell'] = 0
 
-            margin_required_by_long = dict_direction2margin_required_in_perfect_shape['long']
-            margin_required_by_short = dict_direction2margin_required_in_perfect_shape['short']
+            margin_required_by_long = dict_direction2margin_required_in_perfect_shape['buy']
+            margin_required_by_short = dict_direction2margin_required_in_perfect_shape['sell']
             margin_required_in_perfect_shape = max(margin_required_by_long, margin_required_by_short)
 
-            margin_warning_by_long = dict_direction2margin_warning['long']
-            margin_warning_by_short = dict_direction2margin_warning['short']
+            margin_warning_by_long = dict_direction2margin_warning['buy']
+            margin_warning_by_short = dict_direction2margin_warning['sell']
             margin_warning = max(margin_warning_by_long, margin_warning_by_short)
 
         dict_bs_by_acctidbymxz = (
@@ -3991,6 +3992,10 @@ class MainFrameWork:
     def __init__(self):
         self.gv = GlobalVariable()
         self.list_prdcodes = self.gv.list_prdcodes
+
+    def output_future_basis_analysis(self):
+        """输出df, 期指基差分析表"""
+        pass
 
     def generate_excel(self):
         # 生成交易计划页
@@ -4080,14 +4085,14 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['918']:
-                prd = Product(self.gv, prdcode)
-                prd.budget()
-                prd.output_trdplan_order()
-                prd.output_tgtcpsamt()
-                prd.check_exception()
-                prd.check_exposure()
-                print(f'{prdcode} trdplan finished.')
+            # if prdcode in ['1203']:
+            prd = Product(self.gv, prdcode)
+            prd.budget()
+            prd.output_trdplan_order()
+            prd.output_tgtcpsamt()
+            prd.check_exception()
+            prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)

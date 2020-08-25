@@ -71,4 +71,3 @@ class Trader:
         else:
             raise Exception("未接收到产品资金情况数据！")
 
-
