@@ -14,8 +14,6 @@
     4. 当指定的仓位小于max仓位（未满仓）时，在满足产品仓位达标后，还需分配渠道 todo 假设： 分配比例为渠道比例
     5. 在多渠道且有货基的条件下，产品的各渠道的货基值，受各渠道分配到的期指数量影响 todo 假设： 分配比例为渠道比例
 
-
-
 合规假设：
     1. 融资融券业务相关：
         1. 证监会《融资融券合同必备条款》第五条第一款，甲方用于一家证券交易所上市证券交易的信用证券账户只能有一个。
@@ -41,12 +39,9 @@
             已占用保证金和相关利息、费用的余额。其计算公式为：
             保证金可用余额 ＝ 现金
                            + ∑（可充抵保证金的证券市值×折算率）
-
                            + ∑［（融资买入证券市值－融资买入金额）×折算率］
                            + ∑［（融券卖出金额－融券卖出证券市值）×折算率］
-
                            - ∑融券卖出金额
-
                            - ∑融资买入证券金额×融资保证金比例
                            - ∑融券卖出证券市值×融券保证金比例
                            - 利息及费用
@@ -73,15 +68,17 @@
             书，并为其开立信用证券账户和信用资金账户。
     2. 账户相关：
         1. 一个基金产品最多有3个普通证券账户，1个信用证券账户，3个期货账户。
+    3. 网下申购：
 
 Abbr.:
     1. cps: composite
     2. MN: Market Neutral
     3. EI: Enhanced Index
     4. cpspct: composite percentage: composite amt / net asset value
+
 todo:
     2. 国债逆回购（核新系统）不在下载的数据文件之内，如何添加？
-    3. 国债逆回购不同系统的单位价格确认。（核新为1000，有没有100的情况？）
+    3. 国债逆回购不同系统的单位价格确认。（核新为1000，有没有100的情况？）与债券计量单位有关，1收为10张，1张的面值为100元。交易软件中的1股债券
     6. 负债（融券与场外，利息的）的计算需要改进：
         1. 目前状态仅在patchdata 更新时考虑了利息，在源数据的读取中没有考虑利息。
         2. 源数据中提供了利息的应还与未还数据，故可以改进算法，精准计算。
@@ -89,7 +86,8 @@ todo:
     5. AcctType 中的c,m,f,o 统一改为大写
     8. budget算法改进： 当不满仓时，要留足期货户资金
     9. 多渠道最大值算法需要商定
-    10. 申赎款项的自动化
+    10. 申赎款项的自动化(暂时搁置)
+    11. 期货满仓限定(暂时搁置)
 
 Sympy:
     1. Sympy 中的 solveset， 不能解多元非线性方程组（带domain的），但是solve可以。
@@ -106,6 +104,9 @@ Naming Convention:
     3. 本项目中，对于合计项目(如iclots_total)total标识一定要加上.
     4. 对于净资产字段，为避免与None值缩写’N/A,NA'产生混淆，统一使用NAV
 
+配置相关（重要）:
+    配置全量： 1. basic info 2. data_patch 3. global variable 中的初始化函数
+
 """
 from datetime import datetime
 from math import floor
@@ -120,7 +121,6 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        # self.str_today = '20200821'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -191,7 +191,12 @@ class GlobalVariable:
         self.col_tgtcpsamt = self.db_trddata['tgtcpsamt']
         self.col_items_2b_adjusted = self.db_trddata['items_2b_adjusted']
         self.col_trdplan_expression = self.db_basicinfo['trdplan_expression']
-        self.dict_prdcode2special_na_src1 = {'707': 5000000}  # 人工T0处理
+        self.dict_prdcode2special_na_src1 = {'707': 5000000}  # 人工T0处理，仅处理ei策略，视为货基；mn策略无需处理，视为投下层
+        self.dict_strategies2short_strategies = {
+            'MN': {'index_future2adjust_exposure': 'IC'},
+            'EI': {'index_future2adjust_exposure': 'IC'},
+            'IPO_SH': {'index_future2adjust_exposure': 'IH'}
+        }
         # todo 以下代码需要改进
         self.dict_broker_abbr2broker_alias = {}
         for dict_broker_info in self.list_dicts_broker_info:
@@ -202,13 +207,16 @@ class GlobalVariable:
 
 class Product:
     def __init__(self, gv, prdcode):
-        # todo 注意区分属性：产品的/子账户的
+        # 注意区分属性：产品的/子账户的
         self.gv = gv
         self.str_today = self.gv.str_today
         self.prdcode = prdcode
-        self.iter_col_acctinfo_find = (self.gv.col_acctinfo
-                                       .find({'PrdCode': self.prdcode, 'RptMark': 1, 'DataDate': self.str_today}))
-        self.dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
+        self.iter_col_acctinfo_find = (
+            self.gv.col_acctinfo.find({'PrdCode': self.prdcode, 'RptMark': 1, 'DataDate': self.str_today})
+        )
+        self.dict_bs_by_prdcode = self.gv.col_bs_by_prdcode.find_one(
+            {'PrdCode': self.prdcode, 'DataDate': self.str_today}
+        )
         self.dict_exposure_analysis_by_prdcode = (
             self.gv.col_exposure_analysis_by_prdcode.find_one({'PrdCode': self.prdcode, 'DataDate': self.str_today})
         )
@@ -238,6 +246,8 @@ class Product:
         prdcode_in_4121_final_new = self.dict_prdinfo['PrdCodeIn4121FinalNew']
         fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
                                              f'######产品净值相关信息######.xlsx')
+        # \\192.168.4.121\data\Final_new\20200724
+        # fpath_df_unav_from_4121_final_new = '//192.168.4.121/data/Final_new/20200825/######产品净值相关信息######.xlsx'
         if not path.exists(fpath_df_unav_from_4121_final_new):
             fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.gv.str_last_trddate}/'
                                                  f'######产品净值相关信息######.xlsx')
@@ -248,7 +258,7 @@ class Product:
                 '产品编号': str,
                 '产品名称': str,
                 '最新更新日期': str,
-                '最新净值': float,
+                '分红单位净值': float,
             }
         )
         latest_rptdate = None
@@ -257,7 +267,7 @@ class Product:
         for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
             if dict_unav_from_4121_final_new['产品编号'] == prdcode_in_4121_final_new:
                 latest_rptdate = dict_unav_from_4121_final_new['最新更新日期']
-                latest_rptunav = dict_unav_from_4121_final_new['最新净值']
+                latest_rptunav = dict_unav_from_4121_final_new['分红单位净值']
         recdict_unav = {
             'LatestUNAVRptDate': latest_rptdate,
             'LatestRptUNAV': latest_rptunav
@@ -270,8 +280,9 @@ class Product:
         )
         net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
         net_exposure_pct = dict_exposure_analysis_by_prdcode['NetExposure(%)']
-        net_exposure_pct_in_perfect_shape = (0.99 * self.dict_strategies_allocation['EI']
-                                             + 0 * self.dict_strategies_allocation['MN'])
+        net_exposure_pct_in_perfect_shape = (
+                0.99 * self.dict_strategies_allocation['EI'] + 0 * self.dict_strategies_allocation['MN']
+        )
         net_exposure_in_perfect_shape = net_exposure_pct_in_perfect_shape * self.prd_approximate_na
         dif_net_exposure2ps = net_exposure - net_exposure_in_perfect_shape
         dif_pct_net_exposure = net_exposure_pct - net_exposure_pct_in_perfect_shape
@@ -523,6 +534,21 @@ class Product:
 
         todo：
             1. 需要分析两融户中换仓资金的准确算法， 即 保证金制度交易下的详细算法（大课题）。
+            2. 课题：策略分配环节的升级：
+                1. 双策略 → 多策略
+                2. 单一空头策略 → 指定空头策略
+                3. 分配不同策略的目标持仓： 定比模式|最大总资产利用率模式 → 定比模式|最大总资产利用率模式|定值、定比模式
+                answer:
+                    1. dict_asset_allocation = {
+                        src1: {'MN': 0.3, 'EI': 0.7, 'IPO': 65000000},
+                        src2: {'IPO': 65000000}
+                    }
+                    在读取时，补充0
+                    2. dict_strategy2short_strategy = {
+                        'MN': {'index_future2adjust_exposure': 'IC'},
+                        'EI' : {'index_future2adjust_exposure': 'IC'},
+                        'IPO': {'index_future2adjust_exposure': 'IH'}
+                    }
         """
         # 函数级 假设部分
         index_future = self.gv.index_future  # todo 可进一步抽象， 与空头策略有关
@@ -2522,8 +2548,7 @@ class Product:
 
     def get_bgt_without_na_allocation(self):
         """
-        单渠道算法：
-        期货户满仓限定
+        todo 增加沪市打新策略
         """
         # 假设：
         ei_etflongamt_src1 = 0
@@ -2538,12 +2563,14 @@ class Product:
         ei_etfshortamt_src1 = 0
         ei_net_exposure_from_oaccts_src1 = 0
         ei_ce_from_ss_src1 = 0
-
         mn_etflongamt_src1 = 0
         mn_special_na_src1 = 0
 
         # ## src1
         na_src1_tgt = self.prdna_tgt
+        # ipo_sh_src1_tgt = self.dict_strategies_allocation['IPO_SH']
+        # # 根据当前业务假设，一般情况下不调整为IPO准备的市值，目前的做法是单列出一个账户作为该策略的全部持仓
+        # if ipo_sh_src1_tgt in ['current_amt']:
         ei_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['EI']
         mn_na_src1_tgt = na_src1_tgt * self.dict_strategies_allocation['MN']
 
@@ -2568,8 +2595,9 @@ class Product:
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
             )
             mn_capital_debt_in_macct_src1 = dict_bs_by_acctidbymxz['CapitalDebt']
-            mn_security_debt_in_macct_src1 = (dict_bs_by_acctidbymxz['CompositeShortAmt']
-                                              + dict_bs_by_acctidbymxz['ETFShortAmt'])
+            mn_security_debt_in_macct_src1 = (
+                    dict_bs_by_acctidbymxz['CompositeShortAmt'] + dict_bs_by_acctidbymxz['ETFShortAmt']
+            )
             iter_dicts_formatted_holding = self.gv.col_formatted_holding.find(
                 {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz_macct_src1}
             )
@@ -3099,6 +3127,7 @@ class Product:
             net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
         )
         # 开盘即平掉敞口
+        # todo 在多期货户的条件下，会出现操作冗余
         if iclots_rounded2adjust_exposure_by_prdcode:
             if self.dict_na_allocation:
                 if self.dict_na_allocation['FutureAccountsNetAssetAllocation']:
@@ -3142,12 +3171,14 @@ class Product:
                                 iclots_in_facct_holding_aggr_by_acctidbymxz
                                 - iclots_rounded2adjust_exposure_after_allocation
                         )
+
                         dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = {
                             'DataDate': self.str_today,
                             'AcctIDByMXZ': acctidbymxz,
                             'PrdCode': self.prdcode,
                             'ICLotsAfterExposureAdjustment': iclots_after_exposure_adjustment
                         }
+
                         list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz.append(
                             dict_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz
                         )
@@ -3973,7 +4004,7 @@ class Account(Product):
         else:
             pct_cash2trd_by_cpslongamt = 999999999
 
-        if dif_cash > 10000000 and pct_cash2trd_by_cpslongamt > 0.15 or pct_cash2trd_by_cpslongamt < 0.05 and cash < 1000000:
+        if dif_cash > 5000000 and pct_cash2trd_by_cpslongamt > 0.12 or pct_cash2trd_by_cpslongamt < 0.05:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -4085,17 +4116,18 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            # if prdcode in ['1203']:
-            prd = Product(self.gv, prdcode)
-            prd.budget()
-            prd.output_trdplan_order()
-            prd.output_tgtcpsamt()
-            prd.check_exception()
-            prd.check_exposure()
-            print(f'{prdcode} trdplan finished.')
+            if prdcode in ['1202']:
+                prd = Product(self.gv, prdcode)
+                prd.budget()
+                prd.output_trdplan_order()
+                prd.output_tgtcpsamt()
+                prd.check_exception()
+                prd.check_exposure()
+                print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
-        self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
+        if self.gv.list_items_2b_adjusted:
+            self.gv.db_trddata['items_2b_adjusted'].insert_many(self.gv.list_items_2b_adjusted)
         self.generate_excel()
 
 

@@ -74,7 +74,7 @@ from trader_v1 import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        # self.dt_today = datetime(2020, 8, 21)
+        # self.dt_today = datetime(2020, 8, 25)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
@@ -92,6 +92,9 @@ class DBTradingData:
         self.col_na_allocation = self.db_trddata['na_allocation']
         self.col_bs_by_prdcode = self.db_trddata['b/s_by_prdcode']
         self.col_tgtna_by_prdcode = self.db_trddata['tgtna_by_prdcode']
+        self.col_formatted_holding = self.db_trddata['formatted_holding']
+        self.col_cpslongamt_from_sse_by_acctidbymxz = self.db_trddata['col_cpslongamt_from_sse_by_acctidbymxz']
+        self.col_cpslongamt_from_sse_by_prdcode = self.db_trddata['col_cpsamt_from_sse_by_prdcode']
 
     @staticmethod
     def get_recdict_from_two_adjacent_lines(list_datalines, i_row, encoding='utf-8'):
@@ -221,6 +224,18 @@ class DBTradingData:
                 pass
 
             elif data_source_type in ['zx_wealthcats']:
+                fpath = fpath.replace('YYYY-MM-DD', self.dt_today.strftime('%Y-%m-%d'))
+                with codecs.open(fpath, 'rb', 'utf-8-sig') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_capital_wealthcats = dict(zip(list_keys, list_values))
+                            if dict_capital_wealthcats['账户'] == acctidbybroker:
+                                dict_rec_capital.update(dict_capital_wealthcats)
+
+            elif data_source_type in ['db_wealthcats']:
                 fpath = fpath.replace('YYYY-MM-DD', self.dt_today.strftime('%Y-%m-%d'))
                 with codecs.open(fpath, 'rb', 'utf-8-sig') as f:
                     list_datalines = f.readlines()
@@ -749,7 +764,7 @@ class DBTradingData:
                 3. DWBgtUNAV: 划款事项预算净值
                    读取状态码，当状态码为2/3时，
                    如有申赎确认日净值，则使用申赎确认日净值，
-                   否则使用最新净值。
+                   否则使用分红单位净值。
                 2. DWBGTNetAMT, 为该事项的应划款净额(事项的历史合计数)。
                    估算值（谨慎估算），矢量值，为定值，不受部分已划款金额的影响。
                 3. DWBGTNetAMT2DW, 为该事项当前的待划款金额的影响
@@ -777,6 +792,10 @@ class DBTradingData:
         # \\192.168.4.121\data\Final_new\20200724
         fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
                                              f'######产品净值相关信息######.xlsx')
+
+        # \\192.168.4.121\data\Final_new\20200724
+        # fpath_df_unav_from_4121_final_new = ('//192.168.4.121/data/Final_new/20200825/######产品净值相关信息######.xlsx')
+
         if not os.path.exists(fpath_df_unav_from_4121_final_new):
             fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_last_trddate}/'
                                                  f'######产品净值相关信息######.xlsx')
@@ -788,7 +807,7 @@ class DBTradingData:
                 '产品编号': str,
                 '产品名称': str,
                 '最新更新日期': str,
-                '最新净值': float,
+                '分红单位净值': float,
             }
         )
         list_dicts_unavs_from_4121_final_new = df_unav_from_4121_final_new.to_dict('records')
@@ -835,7 +854,7 @@ class DBTradingData:
                 prdcode_in_final_new = dict_unav_from_4121_final_new['产品编号']
                 if prdcode_in_final_new == prdcode_in_4121_final_new:
                     latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
-                    latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
+                    latest_unav_in_final_new = dict_unav_from_4121_final_new['分红单位净值']
                     dict_dwitems_read_excel['LatestUNAVRptDate'] = latest_unav_date_in_final_new
                     dict_dwitems_read_excel['LatestRptUNAV'] = latest_unav_in_final_new
                     if unav_confirmation_date <= latest_unav_date_in_final_new:
@@ -925,7 +944,7 @@ class DBTradingData:
         list_str_wcodes_astock = wset_astock.Data[1]
         # todo 可改进
         list_wcodes_query_patch = ['510500.SH', '511660.SH', '512500.SH', '000905.SH', '000300.SH', '000016.SH',
-                                   'IC2009.CFE']
+                                   'IC2009.CFE', 'IC2012.CFE']
         list_str_wcodes_astock += list_wcodes_query_patch
         str_wcodes_astock = ','.join(list_str_wcodes_astock)
         wss_astock = w.wss(str_wcodes_astock, 'sec_name,close', f'tradeDate={self.str_today};priceAdj=U;cycle=D')
@@ -1228,7 +1247,9 @@ class DBTradingData:
                     else:
                         print(f'{windcode} not found in dict_wcode2close.')
                         close = 0
-
+                    if close is None:
+                        print(f'{windcode} not found in dict_wcode2close.')
+                        close = 0
                     longamt = close * longqty
                     shortamt = 0
                     netamt = longamt - shortamt
@@ -1640,16 +1661,17 @@ class DBTradingData:
                 exposure_net_amt = exposure_long_amt - exposure_short_amt
 
             elif accttype in ['f']:
-                # 按账户整理 exposure数据
-                list_dicts_holding_future = list(self.db_trddata['future_api_holding']
-                                                 .find({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}))
+                # 按acctidbymxz exposure数据
+                list_dicts_holding_future = list(
+                    self.db_trddata['future_api_holding'].find({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+                )
                 list_dicts_holding_future_exposure_draft = []
                 for dict_holding_future in list_dicts_holding_future:
                     secid = dict_holding_future['instrument_id']
                     secid_first_part = secid[:-4]
                     dict_future2spot_windcode = {'IC': '000905.SH', 'IH': '000016.SH', 'IF': '000300.SH'}
                     windcode = dict_future2spot_windcode[secid_first_part]
-                    close = dict_wcode2close[windcode]
+                    close = dict_wcode2close[windcode]  # spot close
                     qty = dict_holding_future['position']
                     direction = dict_holding_future['direction']
                     future_long_qty = 0
@@ -1680,6 +1702,7 @@ class DBTradingData:
                     }
                     list_dicts_holding_future_exposure_draft.append(dict_holding_future_exposure_draft)
                 if list_dicts_holding_future_exposure_draft:
+                    """一个账户的全部品种风险暴露（对IC提供的还是IH提供的未作区分）"""
                     df_holding_future_exposure_draft = pd.DataFrame(list_dicts_holding_future_exposure_draft)
                     exposure_long_amt = float(df_holding_future_exposure_draft['LongAmt'].sum())
                     exposure_short_amt = float(df_holding_future_exposure_draft['ShortAmt'].sum())
@@ -1688,8 +1711,11 @@ class DBTradingData:
                     exposure_long_amt = 0
                     exposure_short_amt = 0
                     exposure_net_amt = 0
-                dict_capital_future = (self.db_trddata['future_api_capital']
-                                       .find_one({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}))
+                dict_capital_future = (
+                    self.db_trddata['future_api_capital'].find_one(
+                        {'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz}
+                    )
+                )
                 flt_approximate_na = dict_capital_future['DYNAMICBALANCE']
                 dict_future_bs = {
                     'DataDate': self.str_today,
@@ -1727,7 +1753,6 @@ class DBTradingData:
                                                                              'AcctIDByMXZ': acctidbymxz})
             if dict_exposure_analysis:
                 self.db_trddata['exposure_analysis_by_acctidbymxz'].insert_one(dict_exposure_analysis)
-
         print('Update capital and holding formatted by internal style finished.')
 
     def update_bs_by_prdcode_and_exposure_analysis_by_prdcode(self):
@@ -1741,6 +1766,7 @@ class DBTradingData:
         self.db_trddata['b/s_by_prdcode'].delete_many({'DataDate': self.str_today})
         if list_dicts_bs_by_prdcode:
             self.db_trddata['b/s_by_prdcode'].insert_many(list_dicts_bs_by_prdcode)
+
         list_dicts_exposure_analysis_by_acctidbymxz = list(
             self.db_trddata['exposure_analysis_by_acctidbymxz'].find({'DataDate': self.str_today}, {'_id': 0})
         )
@@ -1750,6 +1776,7 @@ class DBTradingData:
         df_exposure_analysis_by_prdcode['NetExposure(%)'] = (
                 df_exposure_analysis_by_prdcode['NetExposure'] / df_exposure_analysis_by_prdcode['ApproximateNetAsset']
         )
+
         list_dicts_exposure_analysis_by_prdcode = df_exposure_analysis_by_prdcode.to_dict('records')
         for dict_exposure_analysis_by_prdcode in list_dicts_exposure_analysis_by_prdcode:
             prdcode = dict_exposure_analysis_by_prdcode['PrdCode']
@@ -1774,6 +1801,7 @@ class DBTradingData:
         print('Update b/s by prdcode and exposure analysis by prdcode finished')
 
     def update_faccts_holding_aggr(self):
+        """支持多品种"""
         list_dicts_acctinfo_faccts = list(
             self.col_acctinfo.find({'AcctType': 'f', 'RptMark': 1, 'DataDate': self.str_today})
         )
@@ -1915,13 +1943,72 @@ class DBTradingData:
         if list_dicts_tgtna_by_prdcode:
             self.col_tgtna_by_prdcode.insert_many(list_dicts_tgtna_by_prdcode)
 
+    def update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode(self):
+        list_dicts_cpslongamt_from_sse_by_acctidbymxz = []
+        list_dicts_acctinfo = list(
+            self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1, 'SpecialAccountMark': 0})
+        )
+        for dict_acctinfo in list_dicts_acctinfo:
+            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
+            prdcode = dict_acctinfo['PrdCode']
+            list_dicts_formatted_holding_by_acctidbymxz = list(
+                self.col_formatted_holding.find({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+            )
+            cpslongamt_from_sse = 0
+            for dict_formatted_holding_by_acctidbymxz in list_dicts_formatted_holding_by_acctidbymxz:
+                secidsrc = dict_formatted_holding_by_acctidbymxz['SecurityIDSource']
+                sectype = dict_formatted_holding_by_acctidbymxz['SecurityType']
+                if secidsrc in ['SSE'] and sectype in ['CS']:
+                    cpslongamt_from_sse += dict_formatted_holding_by_acctidbymxz['LongAmt']
+            dict_cpslongamt_from_sse_by_acctidbymxz = {
+                'DataDate': self.str_today,
+                'AcctIDByMXZ': acctidbymxz,
+                'PrdCode': prdcode,
+                'cpslongamt_from_sse': cpslongamt_from_sse
+            }
+            list_dicts_cpslongamt_from_sse_by_acctidbymxz.append(dict_cpslongamt_from_sse_by_acctidbymxz)
+
+        self.col_cpslongamt_from_sse_by_acctidbymxz.delete_many({'DataDate': self.str_today})
+        if list_dicts_cpslongamt_from_sse_by_acctidbymxz:
+            self.col_cpslongamt_from_sse_by_acctidbymxz.insert_many(list_dicts_cpslongamt_from_sse_by_acctidbymxz)
+
+        list_dicts_cpslongamt_from_sse_by_prdcode = []
+        list_dicts_prdinfo = list(self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}))
+        for dict_prdinfo in list_dicts_prdinfo:
+            prdcode = dict_prdinfo['PrdCode']
+            list_dicts_formatted_holding_by_acctidbymxz = list(
+                self.col_formatted_holding.find({'DataDate': self.str_today, 'PrdCode': prdcode})
+            )
+            cpslongamt_from_sse = 0
+            for dict_formatted_holding_by_acctidbymxz in list_dicts_formatted_holding_by_acctidbymxz:
+                secidsrc = dict_formatted_holding_by_acctidbymxz['SecurityIDSource']
+                sectype = dict_formatted_holding_by_acctidbymxz['SecurityType']
+                if secidsrc in ['SSE'] and sectype in ['CS']:
+                    cpslongamt_from_sse += dict_formatted_holding_by_acctidbymxz['LongAmt']
+            dict_cpslongamt_from_sse_by_prdcode = {
+                'DataDate': self.str_today,
+                'PrdCode': prdcode,
+                'cpslongamt_from_sse': cpslongamt_from_sse
+            }
+            list_dicts_cpslongamt_from_sse_by_prdcode.append(dict_cpslongamt_from_sse_by_prdcode)
+
+        self.col_cpslongamt_from_sse_by_prdcode.delete_many({'DataDate': self.str_today})
+        if list_dicts_cpslongamt_from_sse_by_prdcode:
+            self.col_cpslongamt_from_sse_by_prdcode.insert_many(list_dicts_cpslongamt_from_sse_by_prdcode)
+
+
+
+
+
     def run(self):
+        print(f"Running time: {datetime.now().strftime('%Y%m%dT%H%M%S')}")
         # self.update_trddata_f()
         self.update_faccts_holding_aggr()
         self.update_rawdata()
         self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
+        self.update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode()
         self.update_col_tgtna_by_prdcode()
         self.update_na_allocation()
         print("Database preparation finished.")

@@ -13,7 +13,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200821'
+        # self.str_today = '20200825'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -95,6 +95,8 @@ class DatabaseBasicInfo:
                     dict_strategy_allocation['MN'] = 0
                 if 'EI' not in dict_strategy_allocation:
                     dict_strategy_allocation['EI'] = 0
+                if 'IPO_SH' not in dict_strategy_allocation:
+                    dict_strategy_allocation['IPO_SH'] = 0
                 dict_to_be_inserted['StrategiesAllocation'] = dict_strategy_allocation
             if dict_to_be_inserted['NetAssetAllocation']:
                 dict_na_allocation = json.loads(dict_to_be_inserted['NetAssetAllocation'].replace("'", '"'))
@@ -116,6 +118,7 @@ class DatabaseBasicInfo:
                 if 'NetAsset' not in dict_tgtitems:
                     dict_tgtitems['NetAsset'] = None
                 dict_to_be_inserted['TargetItems'] = dict_tgtitems
+
             else:
                 dict_to_be_inserted['TargetItems'] = {
                     'ETFShortAmountInMarginAccount': None,

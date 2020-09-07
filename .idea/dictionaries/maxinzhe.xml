@@ -2,6 +2,7 @@
   <dictionary name="maxinzhe">
     <words>
       <w>acctid</w>
+      <w>acctidby</w>
       <w>acctidbybroker</w>
       <w>acctidbymxz</w>
       <w>acctidbyowj</w>
@@ -44,6 +45,7 @@
       <w>cpsshortamt</w>
       <w>cpstrd</w>
       <w>cpsttrdstarttime</w>
+      <w>curramt</w>
       <w>currmargin</w>
       <w>datadate</w>
       <w>datafilepath</w>
@@ -109,6 +111,7 @@
       <w>oracledb</w>
       <w>patchdata</w>
       <w>patchmark</w>
+      <w>perlot</w>
       <w>pname</w>
       <w>poscost</w>
       <w>positionqty</w>
