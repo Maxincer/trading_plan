@@ -4116,7 +4116,7 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['1202']:
+            if prdcode in ['715']:
                 prd = Product(self.gv, prdcode)
                 prd.budget()
                 prd.output_trdplan_order()

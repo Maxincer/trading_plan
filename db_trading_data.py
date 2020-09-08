@@ -74,7 +74,7 @@ from trader_v1 import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        # self.dt_today = datetime(2020, 8, 25)
+        # self.dt_today = datetime(2020, 9, 4)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
@@ -1949,24 +1949,26 @@ class DBTradingData:
             self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1, 'SpecialAccountMark': 0})
         )
         for dict_acctinfo in list_dicts_acctinfo:
-            acctidbymxz = dict_acctinfo['AcctIDByMXZ']
-            prdcode = dict_acctinfo['PrdCode']
-            list_dicts_formatted_holding_by_acctidbymxz = list(
-                self.col_formatted_holding.find({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
-            )
-            cpslongamt_from_sse = 0
-            for dict_formatted_holding_by_acctidbymxz in list_dicts_formatted_holding_by_acctidbymxz:
-                secidsrc = dict_formatted_holding_by_acctidbymxz['SecurityIDSource']
-                sectype = dict_formatted_holding_by_acctidbymxz['SecurityType']
-                if secidsrc in ['SSE'] and sectype in ['CS']:
-                    cpslongamt_from_sse += dict_formatted_holding_by_acctidbymxz['LongAmt']
-            dict_cpslongamt_from_sse_by_acctidbymxz = {
-                'DataDate': self.str_today,
-                'AcctIDByMXZ': acctidbymxz,
-                'PrdCode': prdcode,
-                'cpslongamt_from_sse': cpslongamt_from_sse
-            }
-            list_dicts_cpslongamt_from_sse_by_acctidbymxz.append(dict_cpslongamt_from_sse_by_acctidbymxz)
+            accttype = dict_acctinfo['AcctType']
+            if accttype in ['c', 'm']:
+                acctidbymxz = dict_acctinfo['AcctIDByMXZ']
+                prdcode = dict_acctinfo['PrdCode']
+                list_dicts_formatted_holding_by_acctidbymxz = list(
+                    self.col_formatted_holding.find({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
+                )
+                cpslongamt_from_sse = 0
+                for dict_formatted_holding_by_acctidbymxz in list_dicts_formatted_holding_by_acctidbymxz:
+                    secidsrc = dict_formatted_holding_by_acctidbymxz['SecurityIDSource']
+                    sectype = dict_formatted_holding_by_acctidbymxz['SecurityType']
+                    if secidsrc in ['SSE'] and sectype in ['CS']:
+                        cpslongamt_from_sse += dict_formatted_holding_by_acctidbymxz['LongAmt']
+                dict_cpslongamt_from_sse_by_acctidbymxz = {
+                    'DataDate': self.str_today,
+                    'AcctIDByMXZ': acctidbymxz,
+                    'PrdCode': prdcode,
+                    'cpslongamt_from_sse': cpslongamt_from_sse
+                }
+                list_dicts_cpslongamt_from_sse_by_acctidbymxz.append(dict_cpslongamt_from_sse_by_acctidbymxz)
 
         self.col_cpslongamt_from_sse_by_acctidbymxz.delete_many({'DataDate': self.str_today})
         if list_dicts_cpslongamt_from_sse_by_acctidbymxz:
@@ -1974,8 +1976,13 @@ class DBTradingData:
 
         list_dicts_cpslongamt_from_sse_by_prdcode = []
         list_dicts_prdinfo = list(self.col_acctinfo.find({'DataDate': self.str_today, 'RptMark': 1}))
+        set_prdcodes = set()
         for dict_prdinfo in list_dicts_prdinfo:
             prdcode = dict_prdinfo['PrdCode']
+            set_prdcodes.add(prdcode)
+        list_prdcodes = list(set_prdcodes)
+
+        for prdcode in list_prdcodes:
             list_dicts_formatted_holding_by_acctidbymxz = list(
                 self.col_formatted_holding.find({'DataDate': self.str_today, 'PrdCode': prdcode})
             )
@@ -1995,10 +2002,7 @@ class DBTradingData:
         self.col_cpslongamt_from_sse_by_prdcode.delete_many({'DataDate': self.str_today})
         if list_dicts_cpslongamt_from_sse_by_prdcode:
             self.col_cpslongamt_from_sse_by_prdcode.insert_many(list_dicts_cpslongamt_from_sse_by_prdcode)
-
-
-
-
+        print('Update cpslongamt from sse finished.')
 
     def run(self):
         print(f"Running time: {datetime.now().strftime('%Y%m%dT%H%M%S')}")
@@ -2008,7 +2012,7 @@ class DBTradingData:
         self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
-        self.update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode()
+        # self.update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode()
         self.update_col_tgtna_by_prdcode()
         self.update_na_allocation()
         print("Database preparation finished.")
