@@ -279,23 +279,22 @@ class Product:
             {'DataDate': self.str_today, 'PrdCode': self.prdcode}
         )
         net_exposure = dict_exposure_analysis_by_prdcode['NetExposure']
-        net_exposure_pct = dict_exposure_analysis_by_prdcode['NetExposure(%)']
+        net_exposure_pct_by_tgtna = net_exposure / self.prdna_tgt
         net_exposure_pct_in_perfect_shape = (
                 0.99 * self.dict_strategies_allocation['EI'] + 0 * self.dict_strategies_allocation['MN']
         )
-        net_exposure_in_perfect_shape = net_exposure_pct_in_perfect_shape * self.prd_approximate_na
+        net_exposure_in_perfect_shape = net_exposure_pct_in_perfect_shape * self.prdna_tgt
         dif_net_exposure2ps = net_exposure - net_exposure_in_perfect_shape
-        dif_pct_net_exposure = net_exposure_pct - net_exposure_pct_in_perfect_shape
-        if abs(dif_net_exposure2ps) > 15000000 or abs(dif_pct_net_exposure) > 0.04:
+        dif_pct_net_exposure_tgtna = net_exposure_pct_by_tgtna - net_exposure_pct_in_perfect_shape
+        if abs(dif_net_exposure2ps) > 15000000 or abs(dif_pct_net_exposure_tgtna) > 0.04:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
                     'NetExposure': net_exposure,
-                    'NetExposure(%)': net_exposure_pct,
+                    'NetExposureByTgtNA(%)': net_exposure_pct_by_tgtna,
                     'NetExposureInPerfectShape': net_exposure_in_perfect_shape,
                     'NetExposure(%)InPerfectShape': net_exposure_pct_in_perfect_shape,
-                    'DifNetExposure2PS': dif_net_exposure2ps,
-                    'DifNetExposure(%)': dif_pct_net_exposure
+                    'DifNetExposureByTgtNA2PS': dif_pct_net_exposure_tgtna,
                 }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
@@ -4116,14 +4115,15 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['715']:
-                prd = Product(self.gv, prdcode)
-                prd.budget()
-                prd.output_trdplan_order()
-                prd.output_tgtcpsamt()
-                prd.check_exception()
-                prd.check_exposure()
-                print(f'{prdcode} trdplan finished.')
+            if prdcode in ['708']:
+                continue
+            prd = Product(self.gv, prdcode)
+            prd.budget()
+            prd.output_trdplan_order()
+            prd.output_tgtcpsamt()
+            prd.check_exception()
+            prd.check_exposure()
+            print(f'{prdcode} trdplan finished.')
 
         self.gv.db_trddata['items_2b_adjusted'].delete_many({'DataDate': self.gv.str_today})
         if self.gv.list_items_2b_adjusted:

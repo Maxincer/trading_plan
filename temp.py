@@ -90,11 +90,12 @@ eq_exposure = cpslongamt + iclots * spot_905 - ttasset * 0.99
 solved = solve([eq_cpslongamt, eq_na, eq_exposure], ce, cpslongamt, iclots)
 print(solved)
 #
-# # 913
-# x = Symbol('x')
-# y = Symbol('y', real=True)
-# solved = solve([x * 1.088 + na_perlot * abs(y) - 58856 - 2062, x + (y - 365) * spot_905], x, y)
-# print(solved)
+# 913
+print('913')
+x = Symbol('x')
+y = Symbol('y', real=True)
+solved = solve([x * 1.088 + na_perlot * abs(y) - 35053 - 4078 + 4000, x + (y - 130) * spot_905], x, y)
+print(solved)
 #
 # 707
 print('707')
