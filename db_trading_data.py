@@ -74,7 +74,7 @@ from trader_v1 import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        # self.dt_today = datetime(2020, 9, 4)
+        # self.dt_today = datetime(2020, 9, 25)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
@@ -111,7 +111,8 @@ class DBTradingData:
             dict_rec.update(dict(zip(list_keys, list_values)))
         return dict_rec
 
-    def read_rawdata_from_trdclient(self, fpath, str_c_h_secliability_mark, data_source_type, accttype, acctidbybroker):
+    def read_rawdata_from_trdclient(self, fpath, str_c_h_secliability_mark, data_source_type,
+                                    accttype, acctidbybroker, dlddata_filter):
         """
         从客户端下载数据，并进行初步清洗。为字符串格式。
         tdx倒出的txt文件有“五粮液错误”，使用xls格式的可解决
@@ -171,6 +172,18 @@ class DBTradingData:
                                 list_recdata = data.strip().decode('gbk').split('：')
                             dict_rec_capital[list_recdata[0].strip()] = \
                                 (lambda x: x if x.strip() in ['人民币'] else list_recdata[1].strip())(list_recdata[1])
+
+            elif data_source_type in ['huat_matic_tsi']:
+                fpath = fpath.replace('<YYYYMMDD>', self.str_today)
+                with open(fpath) as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_capital = dict(zip(list_keys, list_values))
+                            if str(dict_capital['fund_account']) == acctidbybroker:
+                                dict_rec_capital.update(dict_capital)
 
             elif data_source_type in ['gtja_fy'] and accttype in ['c', 'm']:
                 wb = open_workbook(fpath, encoding_override='gbk')
@@ -235,17 +248,17 @@ class DBTradingData:
                             if dict_capital_wealthcats['账户'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital_wealthcats)
 
-            elif data_source_type in ['db_wealthcats']:
-                fpath = fpath.replace('YYYY-MM-DD', self.dt_today.strftime('%Y-%m-%d'))
-                with codecs.open(fpath, 'rb', 'utf-8-sig') as f:
+            elif data_source_type in ['gtja_pluto']:
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
                     list_datalines = f.readlines()
                     list_keys = list_datalines[0].strip().split(',')
                     for dataline in list_datalines[1:]:
                         list_values = dataline.strip().split(',')
                         if len(list_values) == len(list_keys):
-                            dict_capital_wealthcats = dict(zip(list_keys, list_values))
-                            if dict_capital_wealthcats['账户'] == acctidbybroker:
-                                dict_rec_capital.update(dict_capital_wealthcats)
+                            dict_capital = dict(zip(list_keys, list_values))
+                            if dict_capital['单元序号'] == dlddata_filter:
+                                dict_rec_capital.update(dict_capital)
 
             elif data_source_type in ['ax_jzpb']:
                 # todo 账户编号不稳定，求源
@@ -260,7 +273,7 @@ class DBTradingData:
                             if dict_capital_wealthcats['账户编号'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital_wealthcats)
 
-            elif data_source_type in ['zhaos_xtpb']:
+            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb']:
                 # todo 更改路径中的日期
                 fpath = fpath.replace('YYYYMMDD', self.str_today)
                 with codecs.open(fpath, 'rb', 'gbk') as f:
@@ -272,6 +285,7 @@ class DBTradingData:
                             dict_capital = dict(zip(list_keys, list_values))
                             if dict_capital['资金账号'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital)
+
             else:
                 raise ValueError('Field data_source_type not exist in basic info!')
             list_ret.append(dict_rec_capital)
@@ -428,6 +442,18 @@ class DBTradingData:
                             if dict_rec_holding['账户'] == acctidbybroker:
                                 list_ret.append(dict_rec_holding)
 
+            elif data_source_type in ['huat_matic_tsi']:
+                fpath = fpath.replace('<YYYYMMDD>', self.str_today)
+                with open(fpath) as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            if str(dict_rec_holding['fund_account']) == acctidbybroker:
+                                list_ret.append(dict_rec_holding)
+
             elif data_source_type in ['ax_jzpb']:
                 fpath = fpath.replace('YYYYMMDD', self.str_today)
                 with codecs.open(fpath, 'rb', 'gbk') as f:
@@ -440,8 +466,19 @@ class DBTradingData:
                             if dict_rec_holding['账户编号'] == acctidbybroker:
                                 list_ret.append(dict_rec_holding)
 
-            elif data_source_type in ['zhaos_xtpb']:
-                # todo 更改文件中的路径
+            elif data_source_type in ['gtja_pluto']:
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            if dict_rec_holding['单元序号'] == dlddata_filter:
+                                list_ret.append(dict_rec_holding)
+
+            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb']:
                 fpath = fpath.replace('YYYYMMDD', self.str_today)
                 with codecs.open(fpath, 'rb', 'gbk') as f:
                     list_datalines = f.readlines()
@@ -498,6 +535,7 @@ class DBTradingData:
                 acctidbybroker = _['AcctIDByBroker']
                 data_source_type = _['DataSourceType']
                 accttype = _['AcctType']
+                dlddata_filter = _['DownloadDataFilter']
 
                 for ch in ['capital', 'holding', 'secliability']:
                     if ch == 'capital':
@@ -521,7 +559,7 @@ class DBTradingData:
                     col_manually_rawdata.delete_many({'DataDate': self.str_today, 'AcctIDByMXZ': acctidbymxz})
                     fpath_absolute = os.path.join(self.dirpath_data_from_trdclient, fpath_relative)
                     list_dicts_rec = self.read_rawdata_from_trdclient(
-                        fpath_absolute, ch, data_source_type, accttype, acctidbybroker
+                        fpath_absolute, ch, data_source_type, accttype, acctidbybroker, dlddata_filter
                     )
                     for _ in list_dicts_rec:
                         _['DataDate'] = self.str_today
@@ -532,7 +570,7 @@ class DBTradingData:
         print('Update raw data finished.')
 
     def update_trddata_f(self):
-        cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'RptMark': 1}))
+        cursor_find = list(self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f', 'DataDownloadMark': 1}))
         for _ in cursor_find:
             list_future_data_capital = []
             list_future_data_holding = []
@@ -1171,7 +1209,6 @@ class DBTradingData:
             1. 新股的市值的处理（目前: 找出并删除），需要观察经纪商是如何处理的
             2. 本函数有命名混淆：数据表中的holding包含了空头持仓信息，而实际算法中，holding实际是多头持仓。
                FIX协议中，对此区分为两部分，holding 为多头，position为多头与空头的汇总。此处可改进
-
         """
 
         dict_wcode2close = self.df_mktdata_from_wind.set_index('WindCode').to_dict()['Close']
@@ -1188,14 +1225,16 @@ class DBTradingData:
                 list_dicts_holding = list(self.db_trddata['manually_rawdata_holding'].find(
                     {'AcctIDByMXZ': acctidbymxz, 'DataDate': self.str_today}, {'_id': 0}
                 ))
-                list_fields_secid = ['代码', '证券代码']
-                list_fields_symbol = ['证券名称']
+                list_fields_secid = ['代码', '证券代码', 'stock_code']
+                list_fields_symbol = ['证券名称', 'stock_name']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
-                list_fields_exchange = ['市场', '交易市场', '交易板块', '板块', '交易所', '交易所名称']
+                list_fields_exchange = ['市场', '市场代码', '交易市场', '交易板块', '板块', '交易所', '交易所名称',
+                                        'exchange_type']
+
                 # 有优先级别的列表
                 list_fields_longqty = [
                     '股票余额', '拥股数量', '证券余额', '证券数量', '库存数量', '持仓数量', '参考持股', '持股数量', '当前持仓',
-                    '当前余额', '实际数量', '实时余额'
+                    '当前余额', '当前拥股', '实际数量', '实时余额', 'current_amount'
                 ]
                 list_dicts_holding_fmtted = []
                 for dict_holding in list_dicts_holding:
@@ -1223,7 +1262,7 @@ class DBTradingData:
                                                       '深Ａ': 'SZSE', '沪Ａ': 'SSE',
                                                       '上海Ａ': 'SSE', '深圳Ａ': 'SZSE',
                                                       '00': 'SZSE', '10': 'SSE',
-                                                      '0': 'SZSE', '1': 'SSE',
+                                                      '0': 'SZSE', '1': 'SSE', '2': 'SZSE',
                                                       '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
                                                       '上海A股': 'SSE', '深圳A股': 'SZSE',
                                                       'SH': 'SSE', 'SZ': 'SZSE'
@@ -1331,6 +1370,7 @@ class DBTradingData:
                                                       '00': 'SZSE', '10': 'SSE',
                                                       '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
                                                       '上海A股': 'SSE', '深圳A股': 'SZSE',
+                                                      '1': 'SSE', '2': 'SZSE',
                                                       }
                             secidsrc = dict_exchange2secidsrc[exchange]
                     for field_symbol in list_fields_symbol:
@@ -1510,8 +1550,10 @@ class DBTradingData:
                 )
                 if dict_capital is None:
                     dict_capital = {}
-                list_fields_af = ['可用', '可用数', '现金资产', '可用金额', '资金可用金', '可用余额', 'T+1指令可用金额']
-                list_fields_ttasset = ['总资产', '资产', '总 资 产', '单元总资产', '账户总资产', '担保资产']
+                list_fields_af = ['可用', 'A股可用', '可用数', '现金资产', '可用金额', '资金可用金', '可用余额', 'T+1指令可用金额',
+                                  'enable_balance']
+                list_fields_ttasset = ['总资产', '资产', '总 资 产', '实时总资产', '单元总资产', '账户总资产', '担保资产', 'asset_balance',
+                                       'assure_asset']
                 flt_ttasset = None
                 flt_cash = None
 

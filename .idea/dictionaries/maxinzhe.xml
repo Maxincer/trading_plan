@@ -1,6 +1,7 @@
 <component name="ProjectDictionaryState">
   <dictionary name="maxinzhe">
     <words>
+      <w>accountname</w>
       <w>acctid</w>
       <w>acctidby</w>
       <w>acctidbybroker</w>
@@ -19,10 +20,12 @@
       <w>alldays</w>
       <w>allfaccts</w>
       <w>alphabee</w>
+      <w>apama</w>
       <w>apcata</w>
       <w>apporoximate</w>
       <w>aproximate</w>
       <w>astock</w>
+      <w>autodld</w>
       <w>avgprice</w>
       <w>basicinfo</w>
       <w>bgtamt</w>
@@ -59,6 +62,7 @@
       <w>dbclient</w>
       <w>difs</w>
       <w>dirpath</w>
+      <w>dlddata</w>
       <w>dupatch</w>
       <w>dwamt</w>
       <w>dwbgt</w>
@@ -84,10 +88,12 @@
       <w>hexin</w>
       <w>huat</w>
       <w>iclots</w>
+      <w>ihlots</w>
       <w>indexfuture</w>
       <w>jzpb</w>
       <w>liabilityamt</w>
       <w>liabilityqty</w>
+      <w>llys</w>
       <w>localholst</w>
       <w>longamt</w>
       <w>longqty</w>
@@ -104,11 +110,14 @@
       <w>netamt</w>
       <w>netasset</w>
       <w>netqty</w>
+      <w>newshares</w>
       <w>nonetype</w>
       <w>nrows</w>
       <w>oacct</w>
       <w>oaccts</w>
       <w>oracledb</w>
+      <w>osipo</w>
+      <w>ossipo</w>
       <w>patchdata</w>
       <w>patchmark</w>
       <w>perlot</w>
@@ -129,6 +138,7 @@
       <w>rawdata</w>
       <w>readlines</w>
       <w>recdata</w>
+      <w>recdate</w>
       <w>rptaccts</w>
       <w>rptdate</w>
       <w>rptmark</w>
@@ -155,9 +165,12 @@
       <w>shortqty</w>
       <w>shortselling</w>
       <w>skiprows</w>
+      <w>smjxj</w>
       <w>srcs</w>
+      <w>ssipo</w>
       <w>starttime</w>
       <w>startvalue</w>
+      <w>strftime</w>
       <w>swapamt</w>
       <w>swhy</w>
       <w>szse</w>
@@ -194,6 +207,7 @@
       <w>wtdayoffset</w>
       <w>xlsx</w>
       <w>xtpb</w>
+      <w>ysyk</w>
       <w>yyyymmdd</w>
       <w>zhao</w>
       <w>zhaos</w>

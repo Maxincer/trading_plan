@@ -1,10 +1,9 @@
 """
 股指基差分析器
 """
+from time import sleep
 
-# coding: utf-8
-dict_1 = {}
-dict_1.update({'1': '1'})
-print(dict_1)
-dict_1.update({'2': '2'})
-print(dict_1)
+sleep(0.001)
+print('done')
+sleep(0.001)
+print('done')

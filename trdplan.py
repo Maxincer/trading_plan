@@ -121,6 +121,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
+        # self.str_today = '20200930'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -294,7 +295,8 @@ class Product:
                     'NetExposureByTgtNA(%)': net_exposure_pct_by_tgtna,
                     'NetExposureInPerfectShape': net_exposure_in_perfect_shape,
                     'NetExposure(%)InPerfectShape': net_exposure_pct_in_perfect_shape,
-                    'DifNetExposureByTgtNA2PS': dif_pct_net_exposure_tgtna,
+                    'DifNetExposureByTgtNA2PS(%)': dif_pct_net_exposure_tgtna,
+                    'DifNetExposureByTgtNA2PS': dif_net_exposure2ps,
                 }
             self.gv.list_items_2b_adjusted.append(dict_item_2b_adjusted)
 
@@ -1164,6 +1166,7 @@ class Product:
                     # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
                     acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[0],
                             'AcctType': 'c',
@@ -1172,6 +1175,7 @@ class Product:
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[0],
                             'AcctType': 'm',
@@ -1186,6 +1190,7 @@ class Product:
 
                     acctidbymxz_cacct_src2 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[1],
                             'AcctType': 'c',
@@ -1194,6 +1199,7 @@ class Product:
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src2 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[1],
                             'AcctType': 'm',
@@ -2181,6 +2187,7 @@ class Product:
                     # 公司内部分配算法：信用户如有负债则在信用户中留足够且仅够开满仓的净资产
                     acctidbymxz_cacct_src1 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[0],
                             'AcctType': 'c',
@@ -2189,6 +2196,7 @@ class Product:
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src1 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[0],
                             'AcctType': 'm',
@@ -2203,6 +2211,7 @@ class Product:
 
                     acctidbymxz_cacct_src2 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[1],
                             'AcctType': 'c',
@@ -2211,6 +2220,7 @@ class Product:
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src2 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[1],
                             'AcctType': 'm',
@@ -2226,6 +2236,7 @@ class Product:
 
                     acctidbymxz_cacct_src3 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[2],
                             'AcctType': 'c',
@@ -2234,6 +2245,7 @@ class Product:
                     )['AcctIDByMXZ']
                     dict_acctidbymxz_macct_src3 = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'CapitalSource': list_keys_na_allocation_saccts[2],
                             'AcctType': 'm',
@@ -2281,6 +2293,7 @@ class Product:
                     # 如有信用户，则该渠道按照最少净资产原则放在信用户里交易（实际中由于受担保比例3的影响，转账受到限制）
                     dict_macct_basicinfo = self.gv.col_acctinfo.find_one(
                         {
+                            'DataDate': self.str_today,
                             'PrdCode': self.prdcode,
                             'AcctType': 'm',
                             'RptMark': 1,
@@ -3121,6 +3134,7 @@ class Product:
         # 在内存建立数据表类型条目，记录调整敞口后的各期货账户holding
         list_dicts_facct_holding_aggr_after_exposure_adjustment_by_acctidbymxz = []
         list_order_exposure_adjustment = []
+        # 注意，开盘调整的敞口不是根据目标产品规模计算的（增强产品的申赎）
         net_exposure_dif = self.dict_exposure_analysis_by_prdcode['NetExposureDif']
         iclots_rounded2adjust_exposure_by_prdcode = round(
             net_exposure_dif / self.gv.dict_index_future2spot_exposure_per_lot[self.gv.index_future]
@@ -4003,7 +4017,8 @@ class Account(Product):
         else:
             pct_cash2trd_by_cpslongamt = 999999999
 
-        if dif_cash > 5000000 and pct_cash2trd_by_cpslongamt > 0.12 or pct_cash2trd_by_cpslongamt < 0.05:
+        if (dif_cash > 5000000 and pct_cash2trd_by_cpslongamt > 0.12
+                or pct_cash2trd_by_cpslongamt < 0.05):
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -4117,6 +4132,7 @@ class MainFrameWork:
         for prdcode in self.list_prdcodes:
             if prdcode in ['708']:
                 continue
+            # if prdcode in ['906']:
             prd = Product(self.gv, prdcode)
             prd.budget()
             prd.output_trdplan_order()

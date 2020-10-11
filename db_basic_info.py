@@ -2,9 +2,17 @@
 # coding:utf-8
 # Author: Maxincer
 
+"""
+StrategiesAllocationByAcct: 描述一个账户中的portfolio归属于哪个composite
+    OSSIPO: offline subscription of shares of IPO
+    OSSIPO_newshares: OSSIPO composite下的 new shares 部分
+    OSSIPO_threshold: OSSIPO composite下的 threshold 部分
+"""
+
+
 from datetime import datetime
 import json
-from os import path
+import os
 
 import pymongo
 import pandas as pd
@@ -13,7 +21,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200825'
+        # self.str_today = '20200925'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -39,6 +47,8 @@ class DatabaseBasicInfo:
                                         'AcctType': str,
                                         'BrokerAlias': str,
                                         'DataDate': str,
+                                        'DataDownloadMark': int,
+                                        'DownloadDataFilter': str,
                                         'DataFilePath': str,
                                         'DataSourceType': str,
                                         'PatchMark': int,
@@ -134,7 +144,7 @@ class DatabaseBasicInfo:
 
         fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
                                              f'######产品净值相关信息######.xlsx')
-        if path.exists(fpath_df_unav_from_4121_final_new):
+        if os.path.exists(fpath_df_unav_from_4121_final_new):
             # 注意读取的最新日期有可能会改变格式，目前为-
             df_unav_from_4121_final_new = pd.read_excel(
                 fpath_df_unav_from_4121_final_new,
@@ -142,14 +152,14 @@ class DatabaseBasicInfo:
                     '产品编号': str,
                     '产品名称': str,
                     '最新更新日期': str,
-                    '最新净值': float,
+                    '分红单位净值': float,
                 }
             )
             list_dicts_unavs_from_4121_final_new = df_unav_from_4121_final_new.to_dict('records')
             for dict_unav_from_4121_final_new in list_dicts_unavs_from_4121_final_new:
                 prdcode_in_4122_final_new = dict_unav_from_4121_final_new['产品编号']
                 latest_unav_date_in_final_new = dict_unav_from_4121_final_new['最新更新日期'].replace('-', '')
-                latest_unav_in_final_new = dict_unav_from_4121_final_new['最新净值']
+                latest_unav_in_final_new = dict_unav_from_4121_final_new['分红单位净值']
 
                 dict_prdinfo = self.col_prdinfo.find_one(
                     {'DataDate': self.str_today, 'PrdCodeIn4121FinalNew': prdcode_in_4122_final_new}
@@ -178,6 +188,7 @@ class DatabaseBasicInfo:
                                            'BrokerType': str,
                                            'BrokerAliasInTrdPlan': str
                                        })
+
         df_broker_info = df_broker_info.where(df_broker_info.notnull(), None)
         list_dicts_to_be_inserted = df_broker_info.to_dict('records')
         for dict_to_be_inserted in list_dicts_to_be_inserted:
@@ -203,11 +214,47 @@ class DatabaseBasicInfo:
         self.col_trdplan_expression.insert_many(list_dicts_to_be_inserted)
         print('Collection "trdplan_expression" has been updated.')
 
+    def check_whether_set_faccts_consistent_with_set_from_owj(self):
+        list_dicts_faccts_basicinfo = list(
+            self.col_acctinfo.find({'DataDate': self.str_today, 'AcctType': 'f'})
+        )
+        set_acctidbyowj_from_basicinfo = set()
+        for dict_facct in list_dicts_faccts_basicinfo:
+            acctidbyowj_from_basicinfo = dict_facct['AcctIDByOuWangJiang4FTrd']
+            set_acctidbyowj_from_basicinfo.add(acctidbyowj_from_basicinfo)
+        dirpath_future_downloader = '//192.168.2.104/future_downloader'
+        list_dirs_in_future_downloader = os.listdir(dirpath_future_downloader)
+        str_latest_recdate = ''
+        for dir_in_future_downloader in list_dirs_in_future_downloader:
+            if dir_in_future_downloader.isalnum() and len(dir_in_future_downloader) == 8:
+                if dir_in_future_downloader > str_latest_recdate:
+                    str_latest_recdate = dir_in_future_downloader
+        list_acctidbyowj = os.listdir(os.path.join(dirpath_future_downloader, str_latest_recdate))
+        set_acctidbyowj_from_future_downloader = set(list_acctidbyowj)
+
+        dif_basic2downloader = set_acctidbyowj_from_basicinfo - set_acctidbyowj_from_future_downloader
+        dif_downloader2basic = set_acctidbyowj_from_future_downloader - set_acctidbyowj_from_basicinfo
+
+        if dif_basic2downloader:
+            print(
+                f'basicinfo 中有，但是future_downloader中没有：\n'
+                f'差异项个数: {len(dif_basic2downloader) - 1}, \n',
+                f'{dif_basic2downloader}'
+            )
+
+        if dif_downloader2basic:
+            print(
+                f'future_downloader 中有，但是basicinfo中没有：\n'
+                f'差异项个数: {len(dif_downloader2basic) - 1}, \n',
+                f'{dif_downloader2basic}'
+            )
+
     def run(self):
         self.update_acctinfo()
         self.update_prdinfo()
         self.update_broker_info()
         self.update_trdplan_expression()
+        self.check_whether_set_faccts_consistent_with_set_from_owj()
 
 
 if __name__ == '__main__':
