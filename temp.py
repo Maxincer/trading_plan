@@ -101,13 +101,13 @@ print(na_perlot_ih)
 # print(solved)
 # #
 # # 707
-# print('707')
-# x = Symbol('x')
-# y = Symbol('y', real=True)
-# ce = Symbol('ce', real=True)
-#
-# solved = solve([500 + ce + x * 1.088 + na_perlot * abs(y) - 9907, x + y * spot_905 - 9907 * 0.99, y - 22], x, y, ce)
-# print(solved)
+print('707')
+x = Symbol('x')
+y = Symbol('y', real=True)
+ce = Symbol('ce', real=True)
+
+solved = solve([500 + ce + x * 1.088 + 25.8 * abs(y) - 8302, x + y * spot_905 - 8302 * 0.99, ce], x, y, ce)
+print(solved)
 # #
 # # 930
 # print('930')

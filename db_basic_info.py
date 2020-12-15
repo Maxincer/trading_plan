@@ -21,7 +21,7 @@ import pandas as pd
 class DatabaseBasicInfo:
     def __init__(self):
         self.str_today = datetime.strftime(datetime.today(), '%Y%m%d')
-        # self.str_today = '20200925'
+        # self.str_today = '20201214'
         self.fpath_basicinfo = 'data/basic_info.xlsx'
         dbclient = pymongo.MongoClient('mongodb://localhost:27017/')
         db_basicinfo = dbclient['basicinfo']
@@ -33,8 +33,8 @@ class DatabaseBasicInfo:
 
     def update_acctinfo(self):
         """
-        # 重要： 在self.update_prdinfo之前运行
-        # """
+        重要： 在self.update_prdinfo之前运行
+        """
         df_acctinfo = pd.read_excel(self.fpath_basicinfo,
                                     sheet_name='acctinfo',
                                     dtype={

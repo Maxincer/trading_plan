@@ -121,7 +121,7 @@ from WindPy import w
 class GlobalVariable:
     def __init__(self):
         self.str_today = datetime.today().strftime('%Y%m%d')
-        # self.str_today = '20200930'
+        # self.str_today = '20201023'
         self.list_items_2b_adjusted = []
         self.dict_index_future_windcode2close = {}
         self.mongodb_local = pymongo.MongoClient('mongodb://localhost:27017/')
@@ -248,7 +248,7 @@ class Product:
         fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_today}/'
                                              f'######产品净值相关信息######.xlsx')
         # \\192.168.4.121\data\Final_new\20200724
-        # fpath_df_unav_from_4121_final_new = '//192.168.4.121/data/Final_new/20200825/######产品净值相关信息######.xlsx'
+        # fpath_df_unav_from_4121_final_new = '//192.168.4.121/data/Final_new/20201014/######产品净值相关信息######.xlsx'
         if not path.exists(fpath_df_unav_from_4121_final_new):
             fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.gv.str_last_trddate}/'
                                                  f'######产品净值相关信息######.xlsx')
@@ -4017,8 +4017,7 @@ class Account(Product):
         else:
             pct_cash2trd_by_cpslongamt = 999999999
 
-        if (dif_cash > 5000000 and pct_cash2trd_by_cpslongamt > 0.12
-                or pct_cash2trd_by_cpslongamt < 0.05):
+        if dif_cash > 5000000 and pct_cash2trd_by_cpslongamt > 0.12 or pct_cash2trd_by_cpslongamt < 0.05:
             dict_item_2b_adjusted = {
                     'DataDate': self.str_today,
                     'PrdCode': self.prdcode,
@@ -4130,9 +4129,9 @@ class MainFrameWork:
 
     def run(self):
         for prdcode in self.list_prdcodes:
-            if prdcode in ['708']:
-                continue
-            # if prdcode in ['906']:
+            # if prdcode in ['1207']:
+            #     continue
+            # if prdcode in ['918']:
             prd = Product(self.gv, prdcode)
             prd.budget()
             prd.output_trdplan_order()

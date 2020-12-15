@@ -11,7 +11,10 @@ Steps:
     1. 在以资金账户名命名的各自的文件夹中，生成文件单: query_YYYYMMDD.dat, file_server_list_YYYYMMDD.dat
     2. 将1中两个文件先后传入对应目录
     3. 取回源数据(stock_YYYYMMDD.dat, fund_YYYYMMD.dat)
-    4. 将源数据清洗为通用格式数据(fund, position, trdrec)
+    4. 将源数据清洗为内部格式数据(fund, position, trdrec)
+    5. 将内部格式数据进行存到指定目录中:
+        1. yh_apama/YYYYMMDD_cacct_fund.csv,
+        2. yh_apama/YYYYMMDD_macct_fund.csv,
 
 Note:
     1. strftime行为中的%f为microsecond, 是微秒, 是0.000001秒；millisecond是毫秒, 是0.001秒
@@ -55,6 +58,7 @@ class yh_apama_api:
             )
         )
         self.list_dicts_acctinfo_sacct = list_dicts_acctinfo_cacct + list_dicts_acctinfo_macct
+        self.dirpath_output_fmtted_style_custom = 'data/yh_apama_api/yh_apama'
 
     def generate_and_put_dat_query_and_dat_file_server_list(self):
         trans = paramiko.Transport((self.host_sftp_yh_apama, self.port_sftp_yh_apama))
@@ -101,7 +105,6 @@ class yh_apama_api:
             acctidbybroker = dict_acctinfo_sacct['AcctIDByBroker']
             dlddata_filter = dict_acctinfo_sacct['DownloadDataFilter']
             dirpath_acctidbybroker_for_dat = os.path.join(self.dirpath_output, acctidbybroker)
-
 
 
 

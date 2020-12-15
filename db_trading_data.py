@@ -74,7 +74,7 @@ from trader_v1 import Trader
 class DBTradingData:
     def __init__(self):
         self.dt_today = datetime.today()
-        # self.dt_today = datetime(2020, 9, 25)
+        # self.dt_today = datetime(2020, 10, 23)
         self.str_today = datetime.strftime(self.dt_today, '%Y%m%d')
         w.start()
         self.str_last_trddate = w.tdaysoffset(-1, self.str_today, "").Data[0][0].strftime('%Y%m%d')
@@ -273,8 +273,7 @@ class DBTradingData:
                             if dict_capital_wealthcats['账户编号'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital_wealthcats)
 
-            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb']:
-                # todo 更改路径中的日期
+            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb', 'hf_xtpb']:
                 fpath = fpath.replace('YYYYMMDD', self.str_today)
                 with codecs.open(fpath, 'rb', 'gbk') as f:
                     list_datalines = f.readlines()
@@ -284,6 +283,18 @@ class DBTradingData:
                         if len(list_values) == len(list_keys):
                             dict_capital = dict(zip(list_keys, list_values))
                             if dict_capital['资金账号'] == acctidbybroker:
+                                dict_rec_capital.update(dict_capital)
+
+            elif data_source_type in ['gs_htpb']:
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_capital = dict(zip(list_keys, list_values))
+                            if dict_capital['资金账户'] == acctidbybroker:
                                 dict_rec_capital.update(dict_capital)
 
             else:
@@ -478,7 +489,7 @@ class DBTradingData:
                             if dict_rec_holding['单元序号'] == dlddata_filter:
                                 list_ret.append(dict_rec_holding)
 
-            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb']:
+            elif data_source_type in ['zhaos_xtpb', 'db_xtpb_net', 'db_xtpb_smjxj', 'zxjt_xtpb', 'hf_xtpb']:
                 fpath = fpath.replace('YYYYMMDD', self.str_today)
                 with codecs.open(fpath, 'rb', 'gbk') as f:
                     list_datalines = f.readlines()
@@ -490,8 +501,20 @@ class DBTradingData:
                             if dict_rec_holding['资金账号'] == acctidbybroker:
                                 list_ret.append(dict_rec_holding)
 
+            elif data_source_type in ['gs_htpb']:
+                fpath = fpath.replace('YYYYMMDD', self.str_today)
+                with codecs.open(fpath, 'rb', 'gbk') as f:
+                    list_datalines = f.readlines()
+                    list_keys = list_datalines[0].strip().split(',')
+                    for dataline in list_datalines[1:]:
+                        list_values = dataline.strip().split(',')
+                        if len(list_values) == len(list_keys):
+                            dict_rec_holding = dict(zip(list_keys, list_values))
+                            if dict_rec_holding['资金账户'] == acctidbybroker:
+                                list_ret.append(dict_rec_holding)
+
         elif str_c_h_secliability_mark == 'secliability':
-            if data_source_type in ['zhaos_tdx'] and accttype in ['m']:
+            if data_source_type in ['zhaos_xtpb'] and accttype in ['m']:
                 with open(fpath, 'rb') as f:
                     list_datalines = f.readlines()
                     start_index_secliability = None
@@ -832,7 +855,7 @@ class DBTradingData:
                                              f'######产品净值相关信息######.xlsx')
 
         # \\192.168.4.121\data\Final_new\20200724
-        # fpath_df_unav_from_4121_final_new = ('//192.168.4.121/data/Final_new/20200825/######产品净值相关信息######.xlsx')
+        # fpath_df_unav_from_4121_final_new = ('//192.168.4.121/data/Final_new/20201014/######产品净值相关信息######.xlsx')
 
         if not os.path.exists(fpath_df_unav_from_4121_final_new):
             fpath_df_unav_from_4121_final_new = (f'//192.168.4.121/data/Final_new/{self.str_last_trddate}/'
@@ -990,9 +1013,10 @@ class DBTradingData:
             wss_astock.Data, index=wss_astock.Fields, columns=wss_astock.Codes
         ).T.reset_index().rename(columns={'index': 'WindCode', 'SEC_NAME': 'Symbol', 'CLOSE': 'Close'})
         list_dicts_mktpatch = [
-            {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 1000},  # 华泰核新 单价1000
+            {'WindCode': '204001.SH', 'Symbol': 'GC001', 'Close': 100},  # 迅投PB 单价100，华泰核心，单价1000
             {'WindCode': '511990.SH', 'Symbol': '华宝添益', 'Close': 100},
-            {'WindCode': '511880.SH', 'Symbol': '银河日利', 'Close': 100}
+            {'WindCode': '511880.SH', 'Symbol': '银河日利', 'Close': 100},
+            {'WindCode': '159001.SZ', 'Symbol': '保证金', 'Close': 100}
         ]
         df_mktdata_from_wind = df_mktdata_from_wind.append(list_dicts_mktpatch)
         return df_mktdata_from_wind
@@ -1228,7 +1252,7 @@ class DBTradingData:
                 list_fields_secid = ['代码', '证券代码', 'stock_code']
                 list_fields_symbol = ['证券名称', 'stock_name']
                 list_fields_shareholder_acctid = ['股东帐户', '股东账号', '股东代码']
-                list_fields_exchange = ['市场', '市场代码', '交易市场', '交易板块', '板块', '交易所', '交易所名称',
+                list_fields_exchange = ['市场', '市场代码', '交易市场', '交易板块', '板块', '交易所', '交易所名称', '交易市场',
                                         'exchange_type']
 
                 # 有优先级别的列表
@@ -1265,7 +1289,8 @@ class DBTradingData:
                                                       '0': 'SZSE', '1': 'SSE', '2': 'SZSE',
                                                       '上海Ａ股': 'SSE', '深圳Ａ股': 'SZSE',
                                                       '上海A股': 'SSE', '深圳A股': 'SZSE',
-                                                      'SH': 'SSE', 'SZ': 'SZSE'
+                                                      'SH': 'SSE', 'SZ': 'SZSE',
+                                                      '上交所A': 'SSE', '深交所A': 'SZSE',
                                                       }
                             secidsrc = dict_exchange2secidsrc[exchange]
                     for field_symbol in list_fields_symbol:
@@ -1552,8 +1577,8 @@ class DBTradingData:
                     dict_capital = {}
                 list_fields_af = ['可用', 'A股可用', '可用数', '现金资产', '可用金额', '资金可用金', '可用余额', 'T+1指令可用金额',
                                   'enable_balance']
-                list_fields_ttasset = ['总资产', '资产', '总 资 产', '实时总资产', '单元总资产', '账户总资产', '担保资产', 'asset_balance',
-                                       'assure_asset']
+                list_fields_ttasset = ['总资产', '资产', '总 资 产', '实时总资产', '单元总资产', '资产总额', '账户总资产',
+                                       '担保资产', 'asset_balance', 'assure_asset']
                 flt_ttasset = None
                 flt_cash = None
 
@@ -2048,13 +2073,13 @@ class DBTradingData:
 
     def run(self):
         print(f"Running time: {datetime.now().strftime('%Y%m%dT%H%M%S')}")
-        # self.update_trddata_f()
+        self.update_trddata_f()
         self.update_faccts_holding_aggr()
         self.update_rawdata()
         self.update_manually_patchdata()
         self.update_formatted_holding_and_balance_sheet_and_exposure_analysis()
         self.update_bs_by_prdcode_and_exposure_analysis_by_prdcode()
-        # self.update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode()
+        self.update_col_cpslongamt_from_sse_by_acctidbymxz_and_col_cpslongamt_from_sse_by_prdcode()
         self.update_col_tgtna_by_prdcode()
         self.update_na_allocation()
         print("Database preparation finished.")
